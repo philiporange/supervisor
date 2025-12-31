@@ -62,14 +62,18 @@ Projects use `~/.{project_name}/` as the default data directory for databases, l
 | GET | /api/services | List all services |
 | POST | /api/services | Register new service |
 | GET | /api/services/{name} | Get service details |
+| PUT | /api/services/{name} | Update service configuration |
 | DELETE | /api/services/{name} | Remove service |
 | POST | /api/services/{name}/start | Start service |
 | POST | /api/services/{name}/stop | Stop service |
 | POST | /api/services/{name}/restart | Restart service |
 | GET | /api/services/{name}/logs | Get service logs |
 | GET | /api/services/{name}/metrics | Get resource history |
+| GET | /api/services/{name}/metrics/current | Get current resource usage |
 | POST | /api/services/{name}/fix | Trigger auto-fix (background job) |
 | GET | /api/services/{name}/fixes | Get fix attempt history |
+| POST | /api/services/{name}/security-scan | Run security scan (background job) |
+| GET | /api/services/{name}/security-scan/latest | Get latest security scan results |
 | POST | /api/fixes/{id}/restore | Restore code from backup |
 | GET | /api/status | Overview of all services |
 | GET | /api/cron | List all cron jobs |
@@ -80,13 +84,17 @@ Projects use `~/.{project_name}/` as the default data directory for databases, l
 | POST | /api/cron/{name}/run | Trigger cron job immediately |
 | POST | /api/cron/{name}/stop | Stop running cron job |
 | GET | /api/cron/{name}/executions | Get execution history |
+| GET | /api/cron/{name}/executions/{id} | Get specific execution record |
 | POST | /api/cron/tick | Trigger scheduled jobs (called by system cron) |
 | GET | /api/cron/status | Cron jobs overview |
 | GET | /api/cron/validate | Validate cron schedule expression |
 | GET | /api/jobs | List background jobs |
 | GET | /api/jobs/{id} | Get job status/result |
 | GET | /api/supervisor/logs | Get supervisor logs |
+| GET | /api/caddy/config | Get generated Caddy config |
+| GET | /api/caddy/current | Get current running Caddy config |
 | POST | /api/caddy/reload | Reload Caddy config |
+| GET | /api/projects | List available projects in ~/Code/ |
 | POST | /api/onboard | Onboard project with AI |
 | GET | /api/onboard/preview | Preview onboard without running |
 | POST | /api/chat | Stream chat with AI (SSE) |
@@ -164,6 +172,7 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 - **Log Capture** - Stores stdout/stderr in SQLite and log files
 - **Resource Monitoring** - Tracks CPU/memory/disk usage per service and cron job
 - **Auto-Fix** - Uses Robot to detect and fix errors in services and cron jobs (with backup/restore)
+- **Security Scanning** - AI-powered security analysis for Caddy-exposed services
 - **AI Onboarding** - Analyze projects and register them automatically using Robot AI
 - **AI Chat** - Interactive chat assistant for project help and debugging
 - **Background Jobs** - Long operations run async with job tracking

@@ -1,0 +1,83 @@
+{
+  "name": "supervisor",
+  "short_description": "Unified service manager for Python/FastAPI projects with process supervision, cron scheduling, resource monitoring, auto-fix capabilities via Robot AI, and Caddy reverse proxy integration.",
+  "long_description": "Supervisor is a comprehensive service management platform designed for Python and FastAPI projects. It provides unified process management with features including automatic crash recovery and graceful shutdown, scheduled task execution via cron expressions with full execution history, real-time monitoring of CPU/memory/disk resources per service and job, AI-powered auto-fix capabilities using Robot agents to diagnose and fix errors in code, security scanning for exposed services, project onboarding through AI analysis, interactive chat assistance, and Caddy reverse proxy integration for automatic subdomain-based routing. The system stores all data in SQLite with comprehensive logging and supports background job execution for long-running operations. It exposes a complete REST API and includes a web dashboard for visual control and monitoring.",
+  "keywords": [
+    "service-manager",
+    "process-supervision",
+    "cron-scheduler",
+    "resource-monitoring",
+    "auto-fix",
+    "ai-integration",
+    "robot-ai",
+    "caddy",
+    "reverse-proxy",
+    "fastapi",
+    "python",
+    "crash-recovery",
+    "log-management",
+    "job-tracking",
+    "security-scanning",
+    "system-administration",
+    "devops",
+    "api-server",
+    "web-dashboard"
+  ],
+  "primary_language": "Python",
+  "languages": [
+    "Python",
+    "HTML",
+    "JavaScript",
+    "CSS"
+  ],
+  "frameworks": [
+    "FastAPI",
+    "Uvicorn",
+    "Peewee ORM",
+    "Jinja2",
+    "Caddy",
+    "croniter"
+  ],
+  "modules": [
+    {
+      "path": "supervisor/main.py",
+      "description": "FastAPI application serving REST API endpoints for service management, cron jobs, auto-fixes, logs, metrics, Caddy configuration, and project onboarding with SSE streaming for chat."
+    },
+    {
+      "path": "supervisor/process.py",
+      "description": "Process manager handling starting, stopping, and restarting supervised services with crash detection, automatic recovery, and stdout/stderr log capture."
+    },
+    {
+      "path": "supervisor/models.py",
+      "description": "Peewee ORM database models for services, log entries, resource metrics, auto-fix attempts, and cron job schedules with execution history."
+    },
+    {
+      "path": "supervisor/config.py",
+      "description": "Configuration management using environment variables with sensible defaults for server, logging, Caddy, monitoring, and data storage paths."
+    },
+    {
+      "path": "supervisor/monitor.py",
+      "description": "Resource monitoring subsystem that periodically collects CPU, memory, and disk usage statistics and handles cleanup of old logs, metrics, and cron records."
+    },
+    {
+      "path": "supervisor/cron.py",
+      "description": "Cron job scheduler using croniter expressions that executes scheduled tasks with resource tracking, execution history, and support for triggering auto-fixes on failures."
+    },
+    {
+      "path": "supervisor/fixer.py",
+      "description": "Auto-fix integration using Robot AI agents to detect and fix errors in service source code with backup/restore functionality and cron job error recovery."
+    },
+    {
+      "path": "supervisor/caddy.py",
+      "description": "Caddy reverse proxy configuration generator supporting subdomain-based routing for supervised services with admin API integration for reloading."
+    },
+    {
+      "path": "supervisor/robot_integration.py",
+      "description": "Robot AI integration for project onboarding, security scanning, and interactive chat assistance using prompt templates and subprocess execution."
+    },
+    {
+      "path": "supervisor/jobs.py",
+      "description": "Background job tracking system for running blocking operations like auto-fixes in separate threads with status monitoring and result storage."
+    }
+  ]
+}
