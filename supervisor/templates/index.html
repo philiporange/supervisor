@@ -1,0 +1,2014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supervisor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    borderRadius: {
+                        'sm': '3px',
+                        'DEFAULT': '3px',
+                        'md': '3px',
+                        'lg': '3px',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: #080808; }
+        .status-running { box-shadow: 0 0 0 2px #22c55e; }
+        .status-stopped { box-shadow: 0 0 0 2px #ef4444; }
+        .status-warning { box-shadow: 0 0 0 2px #f59e0b; }
+        .context-menu { position: fixed; z-index: 1000; }
+        .pulse-dot { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        /* Chat input container */
+        .chat-input-container {
+            padding: 12px 16px;
+            background: #0a0a0a;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            transition: all 0.15s ease;
+        }
+        .chat-input-container:focus-within {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15), 0 0 20px rgba(59,130,246,0.1);
+        }
+        .chat-input-container.processing {
+            animation: rainbow-glow 3s linear infinite;
+        }
+        @keyframes rainbow-glow {
+            0% { border-color: #3b82f6; box-shadow: 0 0 15px -3px rgba(59,130,246,0.4); }
+            25% { border-color: #8b5cf6; box-shadow: 0 0 15px -3px rgba(139,92,246,0.4); }
+            50% { border-color: #ec4899; box-shadow: 0 0 15px -3px rgba(236,72,153,0.4); }
+            75% { border-color: #10b981; box-shadow: 0 0 15px -3px rgba(16,185,129,0.4); }
+            100% { border-color: #3b82f6; box-shadow: 0 0 15px -3px rgba(59,130,246,0.4); }
+        }
+        .chat-send-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 8px;
+            transition: all 0.15s ease;
+        }
+        .chat-send-btn:hover { background: #60a5fa; transform: scale(1.02); }
+        .chat-send-btn:active { transform: scale(0.98); }
+        .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .chat-send-btn.stop { background: #ef4444; }
+        .chat-send-btn.stop:hover { background: #f87171; }
+
+        /* Chat messages */
+        .chat-message {
+            padding: 16px 20px;
+            border-radius: 10px;
+            animation: fadeUp 0.2s ease;
+        }
+        .chat-message:hover { background: rgba(255,255,255,0.02); }
+        .chat-message.user { background: rgba(59,130,246,0.08); }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-[#080808] text-gray-200 min-h-screen font-sans antialiased">
+    <!-- Header -->
+    <header class="border-b border-gray-800 bg-[#0a0a0a]">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 class="text-lg font-medium tracking-tight">Supervisor</h1>
+
+            <!-- Desktop nav -->
+            <nav class="hidden md:flex gap-1">
+                <button class="tab px-3 py-1.5 text-sm border border-gray-700 bg-white text-black" data-tab="home">Home</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="chat">Chat</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="services">Services</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="cron">Cron</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="jobs">Jobs</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="logs">Logs</button>
+                <button class="tab px-3 py-1.5 text-sm border border-gray-800 text-gray-400 hover:text-white hover:border-gray-600" data-tab="caddy">Caddy</button>
+            </nav>
+
+            <div class="flex items-center gap-3">
+                <div class="text-xs font-mono text-gray-500">
+                    <span id="running-count" class="text-gray-300">0</span>/<span id="total-count">0</span> running
+                </div>
+
+                <!-- Hamburger button -->
+                <button id="menu-toggle" class="md:hidden p-1 text-gray-400 hover:text-white">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h18M3 6h18M3 18h18"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Mobile nav -->
+        <nav id="mobile-nav" class="hidden md:hidden border-t border-gray-800 bg-[#0a0a0a]">
+            <div class="max-w-7xl mx-auto px-4 py-2 flex flex-col gap-1">
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm bg-gray-800 text-white hover:bg-gray-800" data-tab="home">Home</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="chat">Chat</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="services">Services</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="cron">Cron</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="jobs">Jobs</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="logs">Logs</button>
+                <button class="tab-mobile w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-800" data-tab="caddy">Caddy</button>
+            </div>
+        </nav>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4">
+        <!-- Home Tab -->
+        <section id="home-tab" class="tab-content">
+            <div class="mb-6">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-4">Services</h2>
+                <div id="home-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+            <div id="no-services" class="hidden text-center py-12 text-gray-600">
+                <p class="mb-4">No services registered</p>
+                <button onclick="switchTab('services'); showRegisterModal()" class="px-4 py-2 bg-white text-black text-sm font-medium hover:bg-gray-200">
+                    + Register Service
+                </button>
+            </div>
+        </section>
+
+        <!-- Chat Tab -->
+        <section id="chat-tab" class="tab-content hidden flex flex-col" style="height: calc(100vh - 140px);">
+            <!-- Chat messages -->
+            <div id="chat-messages" class="flex-1 overflow-auto p-6 space-y-2">
+                <div class="text-center text-gray-600 py-16">
+                    <p class="mb-2 text-gray-500">AI Assistant</p>
+                    <p class="text-xs text-gray-600">Ask questions, onboard projects, or get help with services</p>
+                </div>
+            </div>
+
+            <!-- Chat input container -->
+            <div class="px-4 pb-6 pt-2">
+                <div id="chat-input-container" class="chat-input-container max-w-3xl mx-auto">
+                    <div class="flex items-end gap-3">
+                        <textarea id="chat-input" rows="1" placeholder="Message..."
+                                  class="flex-1 bg-transparent border-none text-sm text-gray-200 resize-none outline-none placeholder-gray-500"
+                                  style="min-height: 24px; max-height: 200px;"
+                                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChatMessage()}"
+                                  oninput="this.style.height='24px';this.style.height=this.scrollHeight+'px'"></textarea>
+                        <button onclick="sendChatMessage()" id="chat-send" class="chat-send-btn flex-shrink-0">
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 12h15"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2 pt-2 border-t border-gray-800/50 text-xs">
+                        <select id="chat-project" class="bg-transparent border-none text-gray-500 text-xs cursor-pointer hover:text-gray-300 outline-none">
+                            <option value="">No project</option>
+                        </select>
+                        <span class="text-gray-700">•</span>
+                        <select id="chat-model" class="bg-transparent border-none text-gray-500 text-xs cursor-pointer hover:text-gray-300 outline-none uppercase tracking-wide">
+                            <option value="opus">Opus</option>
+                            <option value="sonnet">Sonnet</option>
+                            <option value="haiku">Haiku</option>
+                        </select>
+                        <span class="text-gray-700">•</span>
+                        <button onclick="onboardProject()" class="text-gray-500 hover:text-blue-400 transition-colors">Onboard</button>
+                        <span class="text-gray-700">•</span>
+                        <button onclick="clearChat()" class="text-gray-500 hover:text-gray-300 transition-colors">Clear</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Services Tab -->
+        <section id="services-tab" class="tab-content hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider">All Services</h2>
+                <button onclick="showRegisterModal()" class="px-3 py-1.5 bg-white text-black text-sm font-medium hover:bg-gray-200">
+                    + Register
+                </button>
+            </div>
+            <div id="services-list" class="space-y-2">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- Cron Tab -->
+        <section id="cron-tab" class="tab-content hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider">Cron Jobs</h2>
+                <button onclick="showCronRegisterModal()" class="px-3 py-1.5 bg-white text-black text-sm font-medium hover:bg-gray-200">
+                    + Register
+                </button>
+            </div>
+            <div id="cron-list" class="space-y-2">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- Jobs Tab -->
+        <section id="jobs-tab" class="tab-content hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider">Background Jobs</h2>
+                <div class="flex gap-2">
+                    <select id="jobs-filter" class="bg-[#111] border border-gray-800 text-sm px-2 py-1 text-gray-300">
+                        <option value="">All</option>
+                        <option value="running">Running</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                    <button onclick="loadJobs()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white hover:border-gray-500">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <div id="jobs-list" class="space-y-2">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- Logs Tab -->
+        <section id="logs-tab" class="tab-content hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider">Supervisor Logs</h2>
+                <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                        <input type="checkbox" id="supervisor-logs-live" checked class="accent-green-500">
+                        <span class="flex items-center gap-1">
+                            <span id="supervisor-logs-dot" class="w-2 h-2 rounded-full bg-green-500 pulse-dot"></span>
+                            Live
+                        </span>
+                    </label>
+                    <select id="log-lines" class="bg-[#111] border border-gray-800 text-sm px-2 py-1 text-gray-300">
+                        <option value="50">50 lines</option>
+                        <option value="100" selected>100 lines</option>
+                        <option value="500">500 lines</option>
+                    </select>
+                    <button onclick="loadSupervisorLogs()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white hover:border-gray-500">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <pre id="supervisor-logs" class="bg-[#0a0a0a] border border-gray-800 p-4 text-xs font-mono text-gray-400 h-[calc(100vh-200px)] overflow-auto whitespace-pre-wrap"></pre>
+        </section>
+
+        <!-- Caddy Tab -->
+        <section id="caddy-tab" class="tab-content hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-medium text-gray-500 uppercase tracking-wider">Caddy Configuration</h2>
+                <button onclick="reloadCaddy()" class="px-3 py-1.5 bg-white text-black text-sm font-medium hover:bg-gray-200">
+                    Reload Caddy
+                </button>
+            </div>
+            <div class="mb-6">
+                <h3 class="text-xs text-gray-500 mb-2">Exposed Services</h3>
+                <div id="caddy-services" class="space-y-1"></div>
+            </div>
+            <div>
+                <h3 class="text-xs text-gray-500 mb-2">Generated Caddyfile</h3>
+                <pre id="caddy-config" class="bg-[#0a0a0a] border border-gray-800 p-4 text-xs font-mono text-gray-400 overflow-auto"></pre>
+            </div>
+        </section>
+    </main>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu hidden bg-[#111] border border-gray-700 shadow-xl min-w-[160px]">
+        <div class="py-1">
+            <button onclick="ctxAction('open')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">Open in new tab</button>
+            <div class="border-t border-gray-800 my-1"></div>
+            <button onclick="ctxAction('start')" id="ctx-start" class="w-full px-3 py-1.5 text-left text-sm text-green-400 hover:bg-gray-800">Start</button>
+            <button onclick="ctxAction('stop')" id="ctx-stop" class="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-gray-800">Stop</button>
+            <button onclick="ctxAction('restart')" class="w-full px-3 py-1.5 text-left text-sm text-yellow-400 hover:bg-gray-800">Restart</button>
+            <div class="border-t border-gray-800 my-1"></div>
+            <button onclick="ctxAction('logs')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">View Logs</button>
+            <button onclick="ctxAction('metrics')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">View Metrics</button>
+            <button onclick="ctxAction('fixes')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">Fix History</button>
+            <button onclick="ctxAction('fix')" class="w-full px-3 py-1.5 text-left text-sm text-blue-400 hover:bg-gray-800">Trigger Fix</button>
+            <button onclick="ctxAction('security')" id="ctx-security" class="w-full px-3 py-1.5 text-left text-sm text-purple-400 hover:bg-gray-800">Security Scan</button>
+            <div class="border-t border-gray-800 my-1"></div>
+            <button onclick="ctxAction('edit')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">Edit</button>
+            <button onclick="ctxAction('delete')" class="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-gray-800">Delete</button>
+        </div>
+    </div>
+
+    <!-- Register Modal -->
+    <div id="register-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-md">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Register Service</h3>
+                <button onclick="hideModal('register-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <form id="register-form" class="p-4 space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Name</label>
+                    <input type="text" name="name" required class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Command</label>
+                    <input type="text" name="command" required placeholder="python /path/to/run.py" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Working Directory</label>
+                    <input type="text" name="working_dir" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Port</label>
+                        <input type="number" name="port" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Watch Dirs</label>
+                        <input type="text" name="watch_dirs" placeholder="comma-separated" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                        <input type="checkbox" name="enabled" checked class="accent-green-500">
+                        Enabled
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                        <input type="checkbox" name="expose_caddy" id="reg-expose-caddy" class="accent-green-500">
+                        Caddy
+                    </label>
+                </div>
+                <div id="reg-caddy-path" class="hidden">
+                    <label class="block text-xs text-gray-500 mb-1">Caddy Path</label>
+                    <input type="text" name="caddy_path" placeholder="/myservice" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="hideModal('register-modal')" class="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-white text-black text-sm font-medium hover:bg-gray-200">Register</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-md">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Edit: <span id="edit-title"></span></h3>
+                <button onclick="hideModal('edit-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <form id="edit-form" class="p-4 space-y-3">
+                <input type="hidden" name="name" id="edit-name">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Command</label>
+                    <input type="text" name="command" id="edit-command" required class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Working Directory</label>
+                    <input type="text" name="working_dir" id="edit-working_dir" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Port</label>
+                        <input type="number" name="port" id="edit-port" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Watch Dirs</label>
+                        <input type="text" name="watch_dirs" id="edit-watch_dirs" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                        <input type="checkbox" name="enabled" id="edit-enabled" class="accent-green-500">
+                        Enabled
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                        <input type="checkbox" name="expose_caddy" id="edit-expose_caddy" class="accent-green-500">
+                        Caddy
+                    </label>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Caddy Path</label>
+                    <input type="text" name="caddy_path" id="edit-caddy_path" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="hideModal('edit-modal')" class="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-white text-black text-sm font-medium hover:bg-gray-200">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div id="logs-modal" class="hidden fixed inset-0 bg-black/80 flex flex-col z-50">
+        <div class="bg-[#0a0a0a] border-b border-gray-800 flex items-center justify-between px-4 py-3">
+            <h3 class="font-medium">Logs: <span id="logs-title"></span></h3>
+            <button onclick="closeLogsModal()" class="text-gray-500 hover:text-white text-xl">&times;</button>
+        </div>
+        <div class="bg-[#0a0a0a] px-4 py-2 border-b border-gray-800 flex items-center gap-2">
+            <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                <input type="checkbox" id="logs-live" checked class="accent-green-500">
+                <span class="flex items-center gap-1">
+                    <span id="logs-live-dot" class="w-2 h-2 rounded-full bg-green-500 pulse-dot"></span>
+                    Live
+                </span>
+            </label>
+            <select id="logs-level" class="bg-[#111] border border-gray-800 text-sm px-2 py-1 text-gray-300">
+                <option value="">All levels</option>
+                <option value="info">Info</option>
+                <option value="error">Error</option>
+            </select>
+            <select id="logs-limit" class="bg-[#111] border border-gray-800 text-sm px-2 py-1 text-gray-300">
+                <option value="100">100</option>
+                <option value="500" selected>500</option>
+                <option value="1000">1000</option>
+            </select>
+            <button onclick="refreshServiceLogs()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white">Refresh</button>
+            <div class="flex-1"></div>
+            <span id="logs-status" class="text-xs text-gray-600 font-mono"></span>
+        </div>
+        <pre id="logs-content" class="flex-1 overflow-auto p-4 text-xs font-mono text-gray-400 whitespace-pre-wrap bg-[#050505]"></pre>
+    </div>
+
+    <!-- Metrics Modal -->
+    <div id="metrics-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Metrics: <span id="metrics-title"></span></h3>
+                <button onclick="hideModal('metrics-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div class="px-4 py-2 border-b border-gray-800 flex gap-2">
+                <select id="metrics-hours" class="bg-[#111] border border-gray-800 text-sm px-2 py-1 text-gray-300">
+                    <option value="1">1 hour</option>
+                    <option value="6">6 hours</option>
+                    <option value="24" selected>24 hours</option>
+                    <option value="72">3 days</option>
+                    <option value="168">7 days</option>
+                </select>
+                <button onclick="refreshMetrics()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white">Refresh</button>
+            </div>
+            <div class="flex-1 overflow-auto p-4 space-y-4">
+                <div class="bg-[#111] border border-gray-800 p-3">
+                    <div class="text-xs text-gray-500 mb-2">CPU %</div>
+                    <canvas id="cpu-chart" height="100"></canvas>
+                </div>
+                <div class="bg-[#111] border border-gray-800 p-3">
+                    <div class="text-xs text-gray-500 mb-2">Memory MB</div>
+                    <canvas id="memory-chart" height="100"></canvas>
+                </div>
+                <div class="bg-[#111] border border-gray-800 p-3">
+                    <div class="text-xs text-gray-500 mb-2">Disk MB</div>
+                    <canvas id="disk-chart" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fixes Modal -->
+    <div id="fixes-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Fix History: <span id="fixes-title"></span></h3>
+                <button onclick="hideModal('fixes-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div class="px-4 py-2 border-b border-gray-800 flex gap-2">
+                <button onclick="triggerFix(currentService)" class="px-3 py-1.5 bg-blue-600 text-white text-sm hover:bg-blue-500">Trigger Fix</button>
+                <button onclick="refreshFixes()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white">Refresh</button>
+            </div>
+            <div id="fixes-content" class="flex-1 overflow-auto p-4 space-y-3"></div>
+        </div>
+    </div>
+
+    <!-- Job Detail Modal -->
+    <div id="job-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Job: <span id="job-title"></span></h3>
+                <button onclick="hideModal('job-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div id="job-content" class="flex-1 overflow-auto p-4"></div>
+        </div>
+    </div>
+
+    <!-- Security Scan Modal -->
+    <div id="security-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Security Scan: <span id="security-title"></span></h3>
+                <button onclick="hideModal('security-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-4">
+                <button onclick="runSecurityScan(currentService)" id="scan-btn" class="px-3 py-1.5 bg-blue-600 text-white text-sm hover:bg-blue-500">Run Scan</button>
+                <div id="scan-status" class="text-sm text-gray-500"></div>
+                <div id="scan-summary" class="flex gap-3 ml-auto"></div>
+            </div>
+            <div id="security-content" class="flex-1 overflow-auto p-4">
+                <div id="security-placeholder" class="text-gray-500 text-center py-8">
+                    No security scan results. Click "Run Scan" to analyze this service.
+                </div>
+                <div id="security-findings" class="hidden space-y-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cron Register Modal -->
+    <div id="cron-register-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-md">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Register Cron Job</h3>
+                <button onclick="hideModal('cron-register-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <form id="cron-register-form" class="p-4 space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Name</label>
+                    <input type="text" name="name" required class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Command</label>
+                    <input type="text" name="command" required placeholder="python /path/to/script.py" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Schedule (cron expression)</label>
+                    <input type="text" name="schedule" required placeholder="*/15 * * * *" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none font-mono">
+                    <div id="cron-schedule-preview" class="text-xs text-gray-500 mt-1"></div>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Working Directory</label>
+                    <input type="text" name="working_dir" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Timeout (seconds)</label>
+                        <input type="number" name="timeout" value="300" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                    <div class="flex items-end pb-2">
+                        <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                            <input type="checkbox" name="enabled" checked class="accent-green-500">
+                            Enabled
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Env File (optional)</label>
+                    <input type="text" name="env_file" placeholder="/path/to/.env" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Environment Variables (KEY=VALUE, one per line)</label>
+                    <textarea name="env_vars" rows="3" placeholder="API_KEY=secret&#10;DEBUG=true" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none font-mono"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="hideModal('cron-register-modal')" class="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-white text-black text-sm font-medium hover:bg-gray-200">Register</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cron Edit Modal -->
+    <div id="cron-edit-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-md">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Edit: <span id="cron-edit-title"></span></h3>
+                <button onclick="hideModal('cron-edit-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <form id="cron-edit-form" class="p-4 space-y-3">
+                <input type="hidden" name="name" id="cron-edit-name">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Command</label>
+                    <input type="text" name="command" id="cron-edit-command" required class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Schedule</label>
+                    <input type="text" name="schedule" id="cron-edit-schedule" required class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Working Directory</label>
+                    <input type="text" name="working_dir" id="cron-edit-working_dir" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Timeout (seconds)</label>
+                        <input type="number" name="timeout" id="cron-edit-timeout" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                    </div>
+                    <div class="flex items-end pb-2">
+                        <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                            <input type="checkbox" name="enabled" id="cron-edit-enabled" class="accent-green-500">
+                            Enabled
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Env File (optional)</label>
+                    <input type="text" name="env_file" id="cron-edit-env_file" placeholder="/path/to/.env" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Environment Variables (KEY=VALUE, one per line)</label>
+                    <textarea name="env_vars" id="cron-edit-env_vars" rows="3" placeholder="API_KEY=secret&#10;DEBUG=true" class="w-full bg-[#111] border border-gray-800 px-3 py-2 text-sm focus:border-gray-600 focus:outline-none font-mono"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="hideModal('cron-edit-modal')" class="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-white text-black text-sm font-medium hover:bg-gray-200">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cron Executions Modal -->
+    <div id="cron-executions-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-[#0a0a0a] border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <h3 class="font-medium">Executions: <span id="cron-executions-title"></span></h3>
+                <button onclick="hideModal('cron-executions-modal')" class="text-gray-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div class="px-4 py-2 border-b border-gray-800 flex gap-2">
+                <button onclick="runCronJobNow(currentCronJob)" class="px-3 py-1.5 bg-green-600 text-white text-sm hover:bg-green-500">Run Now</button>
+                <button onclick="refreshCronExecutions()" class="px-3 py-1 border border-gray-700 text-sm text-gray-400 hover:text-white">Refresh</button>
+            </div>
+            <div id="cron-executions-content" class="flex-1 overflow-auto p-4 space-y-2"></div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let services = [];
+        let cronJobs = [];
+        let serviceHost = 'localhost';
+        let currentService = null;
+        let ctxService = null;
+        let statusInterval = null;
+
+        // API
+        async function api(method, path, body = null) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch('/api' + path, opts);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'API error');
+            }
+            return res.json();
+        }
+
+        // Hamburger menu toggle
+        document.getElementById('menu-toggle').addEventListener('click', () => {
+            const nav = document.getElementById('mobile-nav');
+            nav.classList.toggle('hidden');
+        });
+
+        // Tab navigation
+        function switchTab(tab) {
+            // Update desktop tabs
+            document.querySelectorAll('.tab').forEach(t => {
+                t.classList.remove('bg-white', 'text-black');
+                t.classList.add('text-gray-400', 'border-gray-800');
+            });
+            const activeDesktop = document.querySelector(`.tab[data-tab="${tab}"]`);
+            if (activeDesktop) {
+                activeDesktop.classList.add('bg-white', 'text-black');
+                activeDesktop.classList.remove('text-gray-400', 'border-gray-800');
+            }
+
+            // Update mobile tabs
+            document.querySelectorAll('.tab-mobile').forEach(t => {
+                t.classList.remove('bg-gray-800', 'text-white');
+                t.classList.add('text-gray-400');
+            });
+            const activeMobile = document.querySelector(`.tab-mobile[data-tab="${tab}"]`);
+            if (activeMobile) {
+                activeMobile.classList.add('bg-gray-800', 'text-white');
+                activeMobile.classList.remove('text-gray-400');
+            }
+
+            // Hide mobile nav after selection
+            document.getElementById('mobile-nav').classList.add('hidden');
+
+            // Show tab content
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById(tab + '-tab').classList.remove('hidden');
+
+            // Stop supervisor logs interval when leaving logs tab
+            if (tab !== 'logs') {
+                stopSupervisorLogsInterval();
+            }
+
+            if (tab === 'cron') loadCronJobs();
+            if (tab === 'jobs') loadJobs();
+            if (tab === 'logs') {
+                loadSupervisorLogs();
+                startSupervisorLogsInterval();
+            }
+            if (tab === 'caddy') loadCaddy();
+        }
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        document.querySelectorAll('.tab-mobile').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        // Modal helpers
+        function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        // Live status updates
+        async function updateStatus() {
+            try {
+                const status = await api('GET', '/status');
+                services = status.services;
+                serviceHost = status.service_host || 'localhost';
+                document.getElementById('running-count').textContent = status.running;
+                document.getElementById('total-count').textContent = status.total;
+                renderHome();
+                renderServicesList();
+            } catch (e) {
+                console.error('Status update failed:', e);
+            }
+        }
+
+        // Render home grid
+        function renderHome() {
+            const grid = document.getElementById('home-grid');
+            const noServices = document.getElementById('no-services');
+
+            if (services.length === 0) {
+                grid.innerHTML = '';
+                noServices.classList.remove('hidden');
+                return;
+            }
+
+            noServices.classList.add('hidden');
+            grid.innerHTML = services.map(s => {
+                const statusClass = s.running ? 'status-running' : 'status-stopped';
+                const url = s.port ? `http://${serviceHost}:${s.port}` : '#';
+                const hasRecentError = false; // Could check metrics/logs for warning state
+
+                return `
+                    <a href="${url}" target="_blank"
+                       class="block p-4 bg-[#0a0a0a] border border-gray-800 hover:border-gray-600 transition-all ${statusClass}"
+                       data-service="${s.name}"
+                       oncontextmenu="showContextMenu(event, '${s.name}', ${s.running}, ${s.port || 'null'}); return false;">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500 pulse-dot' : 'bg-red-500'}"></span>
+                            <span class="font-medium text-sm truncate">${escapeHtml(s.name)}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 font-mono">
+                            ${s.port ? ':' + s.port : 'no port'}
+                        </div>
+                        ${s.metrics ? `
+                        <div class="mt-2 text-xs text-gray-600 font-mono">
+                            ${s.running ? `CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB` : 'stopped'}
+                        </div>
+                        ` : ''}
+                    </a>
+                `;
+            }).join('');
+        }
+
+        // Render services list
+        function renderServicesList() {
+            const list = document.getElementById('services-list');
+            if (services.length === 0) {
+                list.innerHTML = '<p class="text-gray-600 text-center py-8">No services registered</p>';
+                return;
+            }
+
+            list.innerHTML = services.map(s => {
+                const statusClass = s.running ? 'border-l-green-500' : 'border-l-red-500';
+                const caddySubdomain = s.caddy_subdomain ? `'${s.caddy_subdomain}'` : 'null';
+                return `
+                    <div class="bg-[#0a0a0a] border border-gray-800 border-l-2 ${statusClass} p-3 flex items-center justify-between"
+                         oncontextmenu="showContextMenu(event, '${s.name}', ${s.running}, ${s.port || 'null'}, ${caddySubdomain}); return false;">
+                        <div class="flex items-center gap-4">
+                            <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500' : 'bg-red-500'}"></span>
+                            <div>
+                                <div class="font-medium text-sm">${escapeHtml(s.name)}</div>
+                                <div class="text-xs text-gray-500 font-mono">${s.port ? ':' + s.port : '-'} | PID: ${s.pid || '-'}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            ${s.metrics && s.running ? `
+                            <div class="text-xs text-gray-500 font-mono">
+                                CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB
+                            </div>
+                            ` : ''}
+                            <div class="flex gap-1">
+                                ${s.running ? `
+                                    <button onclick="stopService('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-red-400 hover:bg-red-500/10">Stop</button>
+                                    <button onclick="restartService('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-yellow-400 hover:bg-yellow-500/10">Restart</button>
+                                ` : `
+                                    <button onclick="startService('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-green-400 hover:bg-green-500/10">Start</button>
+                                `}
+                                <button onclick="showServiceLogs('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-gray-400 hover:text-white">Logs</button>
+                                <button onclick="showServiceMetrics('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-gray-400 hover:text-white">Metrics</button>
+                                <button onclick="showServiceFixes('${s.name}')" class="px-2 py-1 text-xs border border-gray-700 text-gray-400 hover:text-white">Fixes</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Context menu
+        function showContextMenu(e, name, running, port, caddySubdomain) {
+            e.preventDefault();
+            ctxService = { name, running, port, caddySubdomain };
+
+            const menu = document.getElementById('context-menu');
+            document.getElementById('ctx-start').classList.toggle('hidden', running);
+            document.getElementById('ctx-stop').classList.toggle('hidden', !running);
+            document.getElementById('ctx-security').classList.toggle('hidden', !caddySubdomain);
+
+            menu.style.left = e.pageX + 'px';
+            menu.style.top = e.pageY + 'px';
+            menu.classList.remove('hidden');
+        }
+
+        function hideContextMenu() {
+            document.getElementById('context-menu').classList.add('hidden');
+        }
+
+        document.addEventListener('click', hideContextMenu);
+        document.addEventListener('contextmenu', (e) => {
+            if (!e.target.closest('[data-service]') && !e.target.closest('.service-card')) {
+                hideContextMenu();
+            }
+        });
+
+        async function ctxAction(action) {
+            hideContextMenu();
+            if (!ctxService) return;
+
+            const { name, port } = ctxService;
+
+            switch (action) {
+                case 'open':
+                    if (port) window.open(`http://${serviceHost}:${port}`, '_blank');
+                    break;
+                case 'start': await startService(name); break;
+                case 'stop': await stopService(name); break;
+                case 'restart': await restartService(name); break;
+                case 'logs': showServiceLogs(name); break;
+                case 'metrics': showServiceMetrics(name); break;
+                case 'fixes': showServiceFixes(name); break;
+                case 'fix': await triggerFix(name); break;
+                case 'security': showSecurityScan(name); break;
+                case 'edit': await showEditModal(name); break;
+                case 'delete': await deleteService(name); break;
+            }
+        }
+
+        // Service actions
+        async function startService(name) {
+            try {
+                await api('POST', `/services/${name}/start`);
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function stopService(name) {
+            try {
+                await api('POST', `/services/${name}/stop`);
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function restartService(name) {
+            try {
+                await api('POST', `/services/${name}/restart`);
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function deleteService(name) {
+            if (!confirm(`Delete "${name}"?`)) return;
+            try {
+                await api('DELETE', `/services/${name}`);
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function triggerFix(name) {
+            if (!confirm(`Trigger auto-fix for "${name}"?`)) return;
+            try {
+                const res = await api('POST', `/services/${name}/fix`);
+                alert(`Fix job started: ${res.job_id}`);
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Security Scan
+        let securityPollInterval = null;
+
+        async function showSecurityScan(name) {
+            currentService = name;
+            document.getElementById('security-title').textContent = name;
+            document.getElementById('scan-status').textContent = '';
+            document.getElementById('scan-summary').innerHTML = '';
+            document.getElementById('security-placeholder').classList.remove('hidden');
+            document.getElementById('security-findings').classList.add('hidden');
+            showModal('security-modal');
+
+            // Check for existing scan results
+            await loadLatestSecurityScan(name);
+        }
+
+        async function loadLatestSecurityScan(name) {
+            try {
+                const data = await api('GET', `/services/${name}/security-scan/latest`);
+                if (data.has_scan) {
+                    if (data.status === 'running') {
+                        document.getElementById('scan-status').textContent = 'Scan in progress...';
+                        document.getElementById('scan-btn').disabled = true;
+                        startSecurityPoll(name);
+                    } else if (data.status === 'completed' && data.result) {
+                        displaySecurityResults(data.result);
+                    } else if (data.status === 'failed') {
+                        document.getElementById('scan-status').textContent = `Scan failed: ${data.error || 'Unknown error'}`;
+                    }
+                }
+            } catch (e) {
+                console.error('Error loading security scan:', e);
+            }
+        }
+
+        async function runSecurityScan(name) {
+            document.getElementById('scan-btn').disabled = true;
+            document.getElementById('scan-status').textContent = 'Starting scan...';
+            document.getElementById('scan-summary').innerHTML = '';
+            document.getElementById('security-placeholder').classList.remove('hidden');
+            document.getElementById('security-findings').classList.add('hidden');
+
+            try {
+                const res = await api('POST', `/services/${name}/security-scan`);
+                document.getElementById('scan-status').textContent = 'Scan in progress...';
+                startSecurityPoll(name);
+            } catch (e) {
+                document.getElementById('scan-btn').disabled = false;
+                document.getElementById('scan-status').textContent = `Error: ${e.message}`;
+            }
+        }
+
+        function startSecurityPoll(name) {
+            stopSecurityPoll();
+            securityPollInterval = setInterval(async () => {
+                try {
+                    const data = await api('GET', `/services/${name}/security-scan/latest`);
+                    if (data.status === 'completed' && data.result) {
+                        stopSecurityPoll();
+                        displaySecurityResults(data.result);
+                    } else if (data.status === 'failed') {
+                        stopSecurityPoll();
+                        document.getElementById('scan-btn').disabled = false;
+                        document.getElementById('scan-status').textContent = `Scan failed: ${data.error || 'Unknown error'}`;
+                    }
+                } catch (e) {
+                    console.error('Error polling security scan:', e);
+                }
+            }, 2000);
+        }
+
+        function stopSecurityPoll() {
+            if (securityPollInterval) {
+                clearInterval(securityPollInterval);
+                securityPollInterval = null;
+            }
+        }
+
+        function displaySecurityResults(result) {
+            document.getElementById('scan-btn').disabled = false;
+            document.getElementById('scan-status').textContent = result.scan_time ? `Scanned: ${new Date(result.scan_time).toLocaleString()}` : '';
+            document.getElementById('security-placeholder').classList.add('hidden');
+            document.getElementById('security-findings').classList.remove('hidden');
+
+            // Display summary
+            const summary = result.summary || { red: 0, amber: 0, green: 0 };
+            document.getElementById('scan-summary').innerHTML = `
+                <span class="flex items-center gap-1">
+                    <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                    <span class="text-sm text-red-400">${summary.red || 0}</span>
+                </span>
+                <span class="flex items-center gap-1">
+                    <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                    <span class="text-sm text-amber-400">${summary.amber || 0}</span>
+                </span>
+                <span class="flex items-center gap-1">
+                    <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                    <span class="text-sm text-green-400">${summary.green || 0}</span>
+                </span>
+            `;
+
+            // Display findings
+            const findings = result.findings || [];
+            const findingsEl = document.getElementById('security-findings');
+
+            if (findings.length === 0) {
+                findingsEl.innerHTML = '<p class="text-gray-500 text-center py-4">No findings</p>';
+                return;
+            }
+
+            // Group by status
+            const grouped = { red: [], amber: [], green: [] };
+            findings.forEach(f => {
+                if (grouped[f.status]) grouped[f.status].push(f);
+            });
+
+            findingsEl.innerHTML = [...grouped.red, ...grouped.amber, ...grouped.green].map(f => {
+                const statusColors = {
+                    red: 'border-l-red-500 bg-red-500/5',
+                    amber: 'border-l-amber-500 bg-amber-500/5',
+                    green: 'border-l-green-500 bg-green-500/5'
+                };
+                const dotColors = {
+                    red: 'bg-red-500',
+                    amber: 'bg-amber-500',
+                    green: 'bg-green-500'
+                };
+                return `
+                    <div class="border border-gray-800 border-l-2 ${statusColors[f.status] || ''} p-3">
+                        <div class="flex items-start gap-2">
+                            <span class="w-2 h-2 rounded-full ${dotColors[f.status] || ''} mt-1.5 flex-shrink-0"></span>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="text-xs text-gray-500 uppercase">${escapeHtml(f.category || '')}</span>
+                                </div>
+                                <div class="font-medium text-sm">${escapeHtml(f.check || '')}</div>
+                                <div class="text-sm text-gray-400 mt-1">${escapeHtml(f.detail || '')}</div>
+                                ${f.recommendation ? `<div class="text-xs text-blue-400 mt-2">Recommendation: ${escapeHtml(f.recommendation)}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Service Logs
+        let logsInterval = null;
+        let logsUserScrolled = false;
+
+        async function showServiceLogs(name) {
+            currentService = name;
+            logsUserScrolled = false;
+            document.getElementById('logs-title').textContent = name;
+            document.getElementById('logs-live').checked = true;
+            updateLogsLiveIndicator(true);
+            showModal('logs-modal');
+            await refreshServiceLogs();
+            startLogsInterval();
+        }
+
+        function closeLogsModal() {
+            stopLogsInterval();
+            hideModal('logs-modal');
+        }
+
+        function startLogsInterval() {
+            stopLogsInterval();
+            if (document.getElementById('logs-live').checked) {
+                logsInterval = setInterval(refreshServiceLogs, 1000);
+            }
+        }
+
+        function stopLogsInterval() {
+            if (logsInterval) {
+                clearInterval(logsInterval);
+                logsInterval = null;
+            }
+        }
+
+        function updateLogsLiveIndicator(live) {
+            const dot = document.getElementById('logs-live-dot');
+            if (live) {
+                dot.classList.remove('bg-gray-500');
+                dot.classList.add('bg-green-500', 'pulse-dot');
+            } else {
+                dot.classList.remove('bg-green-500', 'pulse-dot');
+                dot.classList.add('bg-gray-500');
+            }
+        }
+
+        document.getElementById('logs-live').addEventListener('change', (e) => {
+            updateLogsLiveIndicator(e.target.checked);
+            if (e.target.checked) {
+                logsUserScrolled = false;
+                startLogsInterval();
+                refreshServiceLogs();
+            } else {
+                stopLogsInterval();
+            }
+        });
+
+        // Track if user scrolled up
+        document.getElementById('logs-content').addEventListener('scroll', (e) => {
+            const el = e.target;
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+            logsUserScrolled = !atBottom;
+        });
+
+        async function refreshServiceLogs() {
+            if (!currentService) return;
+            const level = document.getElementById('logs-level').value;
+            const limit = document.getElementById('logs-limit').value;
+            let path = `/services/${currentService}/logs?limit=${limit}`;
+            if (level) path += `&level=${level}`;
+
+            try {
+                const logs = await api('GET', path);
+                const content = document.getElementById('logs-content');
+                const wasAtBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 50;
+
+                content.innerHTML = logs.map(l =>
+                    `<span class="${l.level === 'error' ? 'text-red-400' : 'text-gray-400'}">[${formatTime(l.timestamp)}] ${escapeHtml(l.message)}</span>`
+                ).join('\n') || 'No logs';
+
+                // Auto-scroll to bottom if user hasn't scrolled up
+                if (!logsUserScrolled || wasAtBottom) {
+                    content.scrollTop = content.scrollHeight;
+                }
+
+                document.getElementById('logs-status').textContent = `${logs.length} lines`;
+            } catch (e) {
+                document.getElementById('logs-content').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        // Metrics
+        async function showServiceMetrics(name) {
+            currentService = name;
+            document.getElementById('metrics-title').textContent = name;
+            showModal('metrics-modal');
+            await refreshMetrics();
+        }
+
+        async function refreshMetrics() {
+            if (!currentService) return;
+            const hours = document.getElementById('metrics-hours').value;
+
+            try {
+                const metrics = await api('GET', `/services/${currentService}/metrics?hours=${hours}`);
+                const timestamps = metrics.map(m => m.timestamp);
+                drawChart('cpu-chart', metrics.map(m => m.cpu_percent), timestamps, '#22c55e');
+                drawChart('memory-chart', metrics.map(m => m.memory_mb), timestamps, '#3b82f6');
+                drawChart('disk-chart', metrics.map(m => m.disk_mb || 0), timestamps, '#f59e0b');
+            } catch (e) {
+                console.error('Metrics error:', e);
+            }
+        }
+
+        function drawChart(canvasId, data, timestamps, color) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width = canvas.parentElement.clientWidth - 24;
+            const h = canvas.height;
+
+            ctx.clearRect(0, 0, w, h);
+
+            if (!data.length) {
+                ctx.fillStyle = '#666';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data', w/2, h/2);
+                return;
+            }
+
+            const max = Math.max(...data) * 1.1 || 1;
+            const pad = { t: 10, b: 20, l: 50, r: 10 };
+            const plotW = w - pad.l - pad.r;
+            const plotH = h - pad.t - pad.b;
+
+            // Parse timestamps
+            const dates = timestamps.map(t => new Date(t));
+            const minTime = dates[0].getTime();
+            const maxTime = dates[dates.length - 1].getTime();
+            const timeRange = maxTime - minTime;
+
+            // Horizontal grid
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = pad.t + (plotH / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(pad.l, y);
+                ctx.lineTo(w - pad.r, y);
+                ctx.stroke();
+
+                ctx.fillStyle = '#555';
+                ctx.textAlign = 'right';
+                ctx.font = '10px monospace';
+                ctx.fillText((max - (max/4)*i).toFixed(1), pad.l - 5, y + 3);
+            }
+
+            // Draw hourly markers
+            if (timeRange > 0) {
+                // Find first hour boundary after minTime
+                const firstHour = new Date(dates[0]);
+                firstHour.setMinutes(0, 0, 0);
+                if (firstHour.getTime() <= minTime) {
+                    firstHour.setHours(firstHour.getHours() + 1);
+                }
+
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.fillStyle = '#666';
+                ctx.textAlign = 'center';
+                ctx.font = '9px monospace';
+
+                let hour = new Date(firstHour);
+                while (hour.getTime() <= maxTime) {
+                    const x = pad.l + ((hour.getTime() - minTime) / timeRange) * plotW;
+                    if (x >= pad.l && x <= w - pad.r) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, pad.t);
+                        ctx.lineTo(x, pad.t + plotH);
+                        ctx.stroke();
+
+                        // Label with hour
+                        const label = hour.getHours().toString().padStart(2, '0') + ':00';
+                        ctx.fillText(label, x, h - 3);
+                    }
+                    hour.setHours(hour.getHours() + 1);
+                }
+                ctx.setLineDash([]);
+            }
+
+            // Line
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < data.length; i++) {
+                const x = timeRange > 0
+                    ? pad.l + ((dates[i].getTime() - minTime) / timeRange) * plotW
+                    : pad.l + (i / (data.length - 1 || 1)) * plotW;
+                const y = pad.t + plotH - (data[i] / max) * plotH;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill
+            const lastX = timeRange > 0
+                ? pad.l + ((dates[dates.length - 1].getTime() - minTime) / timeRange) * plotW
+                : pad.l + plotW;
+            ctx.lineTo(lastX, pad.t + plotH);
+            ctx.lineTo(pad.l, pad.t + plotH);
+            ctx.closePath();
+            ctx.fillStyle = color + '15';
+            ctx.fill();
+        }
+
+        // Fixes
+        async function showServiceFixes(name) {
+            currentService = name;
+            document.getElementById('fixes-title').textContent = name;
+            showModal('fixes-modal');
+            await refreshFixes();
+        }
+
+        async function refreshFixes() {
+            if (!currentService) return;
+            try {
+                const fixes = await api('GET', `/services/${currentService}/fixes`);
+                if (!fixes.length) {
+                    document.getElementById('fixes-content').innerHTML = '<p class="text-gray-600">No fix attempts</p>';
+                    return;
+                }
+
+                document.getElementById('fixes-content').innerHTML = fixes.map(f => `
+                    <div class="bg-[#111] border-l-2 ${f.success ? 'border-l-green-500' : 'border-l-red-500'} border border-gray-800 p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm ${f.success ? 'text-green-400' : 'text-red-400'}">${f.success ? 'Success' : 'Failed'}</span>
+                            <span class="text-xs text-gray-500 font-mono">${formatTime(f.timestamp)}</span>
+                            ${f.can_restore ? `<button onclick="restoreBackup(${f.id})" class="px-2 py-1 text-xs bg-yellow-600 text-white hover:bg-yellow-500">Restore</button>` : ''}
+                            ${f.restored ? '<span class="text-xs text-gray-500">Restored</span>' : ''}
+                        </div>
+                        <pre class="text-xs text-gray-400 whitespace-pre-wrap mb-2 max-h-24 overflow-auto">${escapeHtml(f.error_summary)}</pre>
+                        ${f.robot_response ? `<pre class="text-xs text-gray-500 whitespace-pre-wrap max-h-32 overflow-auto">${escapeHtml(f.robot_response)}</pre>` : ''}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('fixes-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function restoreBackup(fixId) {
+            if (!confirm('Restore from backup?')) return;
+            try {
+                await api('POST', `/fixes/${fixId}/restore`);
+                alert('Restored successfully');
+                await refreshFixes();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Jobs
+        async function loadJobs() {
+            const filter = document.getElementById('jobs-filter').value;
+            const path = filter ? `/jobs?status=${filter}` : '/jobs';
+
+            try {
+                const jobs = await api('GET', path);
+                if (!jobs.length) {
+                    document.getElementById('jobs-list').innerHTML = '<p class="text-gray-600 text-center py-8">No jobs</p>';
+                    return;
+                }
+
+                document.getElementById('jobs-list').innerHTML = jobs.map(j => `
+                    <div class="bg-[#0a0a0a] border border-gray-800 p-3 cursor-pointer hover:border-gray-600" onclick="showJobDetail('${j.id}')">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium text-sm">${escapeHtml(j.name)}</span>
+                            <span class="text-xs px-2 py-0.5 bg-[#111] ${
+                                j.status === 'completed' ? 'text-green-400' :
+                                j.status === 'failed' ? 'text-red-400' :
+                                j.status === 'running' ? 'text-blue-400' : 'text-gray-400'
+                            }">${j.status}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 font-mono mt-1">
+                            ${j.id} | ${formatTime(j.created_at)} ${j.duration_seconds ? `| ${j.duration_seconds.toFixed(1)}s` : ''}
+                        </div>
+                        ${j.error ? `<div class="text-xs text-red-400 mt-1">${escapeHtml(j.error)}</div>` : ''}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('jobs-list').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function showJobDetail(id) {
+            document.getElementById('job-title').textContent = id;
+            showModal('job-modal');
+
+            try {
+                const job = await api('GET', `/jobs/${id}`);
+                document.getElementById('job-content').innerHTML = `
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div><span class="text-gray-500">Status:</span> <span class="${
+                                job.status === 'completed' ? 'text-green-400' :
+                                job.status === 'failed' ? 'text-red-400' : 'text-gray-300'
+                            }">${job.status}</span></div>
+                            <div><span class="text-gray-500">Duration:</span> ${job.duration_seconds ? job.duration_seconds.toFixed(1) + 's' : '-'}</div>
+                            <div><span class="text-gray-500">Created:</span> ${formatTime(job.created_at)}</div>
+                            <div><span class="text-gray-500">Completed:</span> ${job.completed_at ? formatTime(job.completed_at) : '-'}</div>
+                        </div>
+                        ${job.error ? `<div class="bg-red-500/10 border border-red-500/30 p-3 text-sm text-red-400"><pre class="whitespace-pre-wrap">${escapeHtml(job.error)}</pre></div>` : ''}
+                        ${job.result ? `<div class="bg-[#111] border border-gray-800 p-3"><pre class="text-xs text-gray-400 whitespace-pre-wrap max-h-64 overflow-auto">${escapeHtml(JSON.stringify(job.result, null, 2))}</pre></div>` : ''}
+                    </div>
+                `;
+            } catch (e) {
+                document.getElementById('job-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        // Supervisor logs
+        let supervisorLogsInterval = null;
+        let supervisorLogsUserScrolled = false;
+
+        async function loadSupervisorLogs() {
+            const lines = document.getElementById('log-lines').value;
+            const content = document.getElementById('supervisor-logs');
+            const wasAtTop = content.scrollTop < 50;
+
+            try {
+                const res = await api('GET', `/supervisor/logs?lines=${lines}`);
+                content.textContent = res.lines.reverse().join('');
+
+                // Auto-scroll to top if user hasn't scrolled down
+                if (!supervisorLogsUserScrolled || wasAtTop) {
+                    content.scrollTop = 0;
+                }
+            } catch (e) {
+                content.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        function startSupervisorLogsInterval() {
+            stopSupervisorLogsInterval();
+            if (document.getElementById('supervisor-logs-live').checked) {
+                supervisorLogsInterval = setInterval(loadSupervisorLogs, 1000);
+            }
+        }
+
+        function stopSupervisorLogsInterval() {
+            if (supervisorLogsInterval) {
+                clearInterval(supervisorLogsInterval);
+                supervisorLogsInterval = null;
+            }
+        }
+
+        function updateSupervisorLogsIndicator(live) {
+            const dot = document.getElementById('supervisor-logs-dot');
+            if (live) {
+                dot.classList.remove('bg-gray-500');
+                dot.classList.add('bg-green-500', 'pulse-dot');
+            } else {
+                dot.classList.remove('bg-green-500', 'pulse-dot');
+                dot.classList.add('bg-gray-500');
+            }
+        }
+
+        document.getElementById('supervisor-logs-live').addEventListener('change', (e) => {
+            updateSupervisorLogsIndicator(e.target.checked);
+            if (e.target.checked) {
+                supervisorLogsUserScrolled = false;
+                startSupervisorLogsInterval();
+                loadSupervisorLogs();
+            } else {
+                stopSupervisorLogsInterval();
+            }
+        });
+
+        document.getElementById('supervisor-logs').addEventListener('scroll', (e) => {
+            const el = e.target;
+            const atTop = el.scrollTop < 50;
+            supervisorLogsUserScrolled = !atTop;
+        });
+
+        // Caddy
+        async function loadCaddy() {
+            try {
+                const conf = await api('GET', '/caddy/config');
+                document.getElementById('caddy-config').textContent = conf.caddyfile;
+
+                if (conf.services.length) {
+                    document.getElementById('caddy-services').innerHTML = conf.services.map(s => `
+                        <div class="bg-[#111] border border-gray-800 px-3 py-2 font-mono text-sm flex gap-4">
+                            <span class="text-gray-300">${escapeHtml(s.name)}</span>
+                            <span class="text-blue-400">${s.path}</span>
+                            <span class="text-gray-500">:${s.port}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('caddy-services').innerHTML = '<p class="text-gray-600">No services exposed</p>';
+                }
+            } catch (e) {
+                document.getElementById('caddy-config').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function reloadCaddy() {
+            try {
+                await api('POST', '/caddy/reload');
+                alert('Caddy reloaded');
+                await loadCaddy();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Register form
+        function showRegisterModal() { showModal('register-modal'); }
+
+        document.getElementById('reg-expose-caddy').addEventListener('change', (e) => {
+            document.getElementById('reg-caddy-path').classList.toggle('hidden', !e.target.checked);
+        });
+
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const watchDirs = form.watch_dirs.value.trim();
+
+            try {
+                await api('POST', '/services', {
+                    name: form.name.value,
+                    command: form.command.value,
+                    working_dir: form.working_dir.value || null,
+                    port: form.port.value ? parseInt(form.port.value) : null,
+                    enabled: form.enabled.checked,
+                    expose_caddy: form.expose_caddy.checked,
+                    caddy_path: form.caddy_path.value || null,
+                    watch_dirs: watchDirs ? watchDirs.split(',').map(d => d.trim()) : null,
+                });
+                hideModal('register-modal');
+                form.reset();
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        });
+
+        // Edit form
+        async function showEditModal(name) {
+            try {
+                const s = await api('GET', `/services/${name}`);
+                document.getElementById('edit-title').textContent = name;
+                document.getElementById('edit-name').value = name;
+                document.getElementById('edit-command').value = s.command;
+                document.getElementById('edit-working_dir').value = s.working_dir || '';
+                document.getElementById('edit-port').value = s.port || '';
+                document.getElementById('edit-watch_dirs').value = s.watch_dirs ? s.watch_dirs.join(', ') : '';
+                document.getElementById('edit-enabled').checked = s.enabled;
+                document.getElementById('edit-expose_caddy').checked = s.expose_caddy;
+                document.getElementById('edit-caddy_path').value = s.caddy_path || '';
+                showModal('edit-modal');
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        document.getElementById('edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const name = form.name.value;
+            const watchDirs = form.watch_dirs.value.trim();
+
+            try {
+                await api('PUT', `/services/${name}`, {
+                    command: form.command.value,
+                    working_dir: form.working_dir.value || null,
+                    port: form.port.value ? parseInt(form.port.value) : null,
+                    enabled: form.enabled.checked,
+                    expose_caddy: form.expose_caddy.checked,
+                    caddy_path: form.caddy_path.value || null,
+                    watch_dirs: watchDirs ? watchDirs.split(',').map(d => d.trim()) : [],
+                });
+                hideModal('edit-modal');
+                await updateStatus();
+            } catch (e) { alert('Error: ' + e.message); }
+        });
+
+        // Utilities
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatTime(iso) {
+            if (!iso) return '-';
+            const d = new Date(iso);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                // Handle logs modal specially to stop interval
+                if (!document.getElementById('logs-modal').classList.contains('hidden')) {
+                    closeLogsModal();
+                }
+                document.querySelectorAll('[id$="-modal"]:not(.hidden)').forEach(m => m.classList.add('hidden'));
+                hideContextMenu();
+            }
+        });
+
+        // Click outside modal to close
+        document.querySelectorAll('[id$="-modal"]').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    if (modal.id === 'logs-modal') {
+                        closeLogsModal();
+                    } else {
+                        modal.classList.add('hidden');
+                    }
+                }
+            });
+        });
+
+        // Chat functionality
+        let chatAbortController = null;
+
+        // Load projects on init
+        async function loadProjects() {
+            try {
+                const data = await api('GET', '/projects');
+                const select = document.getElementById('chat-project');
+                select.innerHTML = '<option value="">No project</option>';
+                for (const proj of data.projects) {
+                    select.innerHTML += `<option value="${proj.name}">${proj.name}</option>`;
+                }
+            } catch (e) {
+                console.error('Failed to load projects:', e);
+            }
+        }
+
+        function clearChat() {
+            document.getElementById('chat-messages').innerHTML = `
+                <div class="text-center text-gray-600 py-16">
+                    <p class="mb-2 text-gray-500">AI Assistant</p>
+                    <p class="text-xs text-gray-600">Ask questions, onboard projects, or get help with services</p>
+                </div>
+            `;
+        }
+
+        function addChatMessage(role, content, isStreaming = false) {
+            const messages = document.getElementById('chat-messages');
+            const isWelcome = messages.querySelector('.text-center');
+            if (isWelcome) messages.innerHTML = '';
+
+            const msgId = isStreaming ? 'streaming-message' : `msg-${Date.now()}`;
+            const existing = document.getElementById(msgId);
+
+            if (existing) {
+                existing.querySelector('.message-content').innerHTML = formatMessage(content);
+            } else {
+                const roleClass = role === 'user' ? 'chat-message user' : 'chat-message';
+                const roleLabel = role === 'user' ? 'You' : 'Assistant';
+                messages.innerHTML += `
+                    <div id="${msgId}" class="${roleClass}">
+                        <div class="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">${roleLabel}</div>
+                        <div class="message-content text-sm leading-relaxed whitespace-pre-wrap text-gray-300">${formatMessage(content)}</div>
+                    </div>
+                `;
+            }
+
+            messages.scrollTop = messages.scrollHeight;
+            return msgId;
+        }
+
+        function formatMessage(content) {
+            // Basic markdown-like formatting
+            return escapeHtml(content)
+                .replace(/`([^`]+)`/g, '<code class="bg-gray-800 px-1.5 py-0.5 rounded text-gray-200 text-xs">$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-gray-100">$1</strong>');
+        }
+
+        function setChatLoading(loading) {
+            const btn = document.getElementById('chat-send');
+            const container = document.getElementById('chat-input-container');
+            const input = document.getElementById('chat-input');
+
+            if (loading) {
+                btn.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>`;
+                btn.onclick = stopChat;
+                btn.classList.add('stop');
+                container.classList.add('processing');
+                input.disabled = true;
+            } else {
+                btn.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>`;
+                btn.onclick = sendChatMessage;
+                btn.classList.remove('stop');
+                container.classList.remove('processing');
+                input.disabled = false;
+                input.focus();
+                input.style.height = '24px';
+            }
+        }
+
+        function stopChat() {
+            if (chatAbortController) {
+                chatAbortController.abort();
+                chatAbortController = null;
+            }
+            setChatLoading(false);
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const project = document.getElementById('chat-project').value || null;
+            const model = document.getElementById('chat-model').value;
+
+            // Add user message
+            addChatMessage('user', message);
+            input.value = '';
+            setChatLoading(true);
+
+            // Start streaming response
+            chatAbortController = new AbortController();
+            let responseContent = '';
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, project, model }),
+                    signal: chatAbortController.signal,
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Chat request failed');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const event = JSON.parse(line.slice(6));
+                            if (event.type === 'text' || event.type === 'content') {
+                                responseContent += (event.content || '') + '\n';
+                                addChatMessage('assistant', responseContent.trim(), true);
+                            } else if (event.type === 'result' && event.content) {
+                                responseContent = event.content;
+                                addChatMessage('assistant', responseContent, true);
+                            } else if (event.type === 'error') {
+                                addChatMessage('assistant', `Error: ${event.content}`, true);
+                            } else if (event.type === 'done') {
+                                // Finalize the message
+                                const streaming = document.getElementById('streaming-message');
+                                if (streaming) streaming.id = `msg-${Date.now()}`;
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    addChatMessage('assistant', `Error: ${e.message}`);
+                }
+            } finally {
+                setChatLoading(false);
+                chatAbortController = null;
+            }
+        }
+
+        async function onboardProject() {
+            const project = document.getElementById('chat-project').value.trim();
+            if (!project) {
+                alert('Enter a project name or path first');
+                return;
+            }
+
+            const model = document.getElementById('chat-model').value;
+
+            // Add user message
+            addChatMessage('user', `Onboard project: ${project}`);
+            setChatLoading(true);
+
+            try {
+                // First preview
+                const preview = await api('GET', `/onboard/preview?project=${encodeURIComponent(project)}`);
+                addChatMessage('assistant', `Analyzing project: ${preview.project_name}\nPath: ${preview.project_path}\nData dir: ${preview.data_dir}\n\nStarting onboard job...`);
+
+                // Start onboard job
+                const result = await api('POST', '/onboard', { project, model });
+                addChatMessage('assistant', `Onboard job started: ${result.job_id}\n\nCheck the Jobs tab for progress.`);
+
+                // Poll job status
+                pollJobStatus(result.job_id);
+            } catch (e) {
+                addChatMessage('assistant', `Error: ${e.message}`);
+            } finally {
+                setChatLoading(false);
+            }
+        }
+
+        async function pollJobStatus(jobId) {
+            const poll = async () => {
+                try {
+                    const job = await api('GET', `/jobs/${jobId}`);
+                    if (job.status === 'completed') {
+                        addChatMessage('assistant', `Onboard completed!\n\n${job.result?.output || 'Project registered successfully.'}`);
+                        await updateStatus();
+                    } else if (job.status === 'failed') {
+                        addChatMessage('assistant', `Onboard failed: ${job.error || 'Unknown error'}`);
+                    } else {
+                        // Still running, poll again
+                        setTimeout(poll, 2000);
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                }
+            };
+            setTimeout(poll, 1000);
+        }
+
+        // Cron Jobs
+        let currentCronJob = null;
+
+        async function loadCronJobs() {
+            try {
+                cronJobs = await api('GET', '/cron');
+                renderCronList();
+            } catch (e) {
+                document.getElementById('cron-list').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        function renderCronList() {
+            const list = document.getElementById('cron-list');
+            if (!cronJobs.length) {
+                list.innerHTML = '<p class="text-gray-600 text-center py-8">No cron jobs registered</p>';
+                return;
+            }
+
+            list.innerHTML = cronJobs.map(j => {
+                const statusClass = j.running ? 'border-l-blue-500' : (j.enabled ? 'border-l-green-500' : 'border-l-gray-500');
+                return `
+                    <div class="bg-[#0a0a0a] border border-gray-800 border-l-2 ${statusClass} p-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-4">
+                                <span class="w-2 h-2 rounded-full ${j.running ? 'bg-blue-500 pulse-dot' : (j.enabled ? 'bg-green-500' : 'bg-gray-500')}"></span>
+                                <div>
+                                    <div class="font-medium text-sm">${escapeHtml(j.name)}</div>
+                                    <div class="text-xs text-gray-500 font-mono">${escapeHtml(j.schedule)} - ${escapeHtml(j.schedule_description || '')}</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <div class="text-xs text-gray-500">
+                                    ${j.last_run ? 'Last: ' + formatTime(j.last_run) : 'Never run'}
+                                    ${j.next_run ? ' | Next: ' + formatTime(j.next_run) : ''}
+                                </div>
+                                <div class="flex gap-1">
+                                    <button onclick="runCronJobNow('${j.name}')" class="px-2 py-1 text-xs border border-gray-700 text-green-400 hover:bg-green-500/10">Run</button>
+                                    <button onclick="showCronExecutions('${j.name}')" class="px-2 py-1 text-xs border border-gray-700 text-gray-400 hover:text-white">History</button>
+                                    <button onclick="showCronEditModal('${j.name}')" class="px-2 py-1 text-xs border border-gray-700 text-gray-400 hover:text-white">Edit</button>
+                                    <button onclick="deleteCronJob('${j.name}')" class="px-2 py-1 text-xs border border-gray-700 text-red-400 hover:bg-red-500/10">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function showCronRegisterModal() {
+            document.getElementById('cron-register-form').reset();
+            showModal('cron-register-modal');
+        }
+
+        document.getElementById('cron-register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+
+            try {
+                await api('POST', '/cron', {
+                    name: form.name.value,
+                    command: form.command.value,
+                    schedule: form.schedule.value,
+                    working_dir: form.working_dir.value || null,
+                    timeout: parseInt(form.timeout.value) || 300,
+                    enabled: form.enabled.checked,
+                    env_file: form.env_file.value || null,
+                    env_vars: parseEnvVars(form.env_vars.value),
+                });
+                hideModal('cron-register-modal');
+                form.reset();
+                await loadCronJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        });
+
+        function parseEnvVars(text) {
+            if (!text || !text.trim()) return null;
+            const vars = {};
+            text.split('\n').forEach(line => {
+                line = line.trim();
+                if (!line || line.startsWith('#')) return;
+                const idx = line.indexOf('=');
+                if (idx > 0) {
+                    const key = line.slice(0, idx).trim();
+                    let value = line.slice(idx + 1).trim();
+                    // Remove surrounding quotes
+                    if ((value.startsWith('"') && value.endsWith('"')) ||
+                        (value.startsWith("'") && value.endsWith("'"))) {
+                        value = value.slice(1, -1);
+                    }
+                    vars[key] = value;
+                }
+            });
+            return Object.keys(vars).length > 0 ? vars : null;
+        }
+
+        function envVarsToText(vars) {
+            if (!vars || Object.keys(vars).length === 0) return '';
+            return Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\n');
+        }
+
+        async function showCronEditModal(name) {
+            try {
+                const j = await api('GET', `/cron/${name}`);
+                document.getElementById('cron-edit-title').textContent = name;
+                document.getElementById('cron-edit-name').value = name;
+                document.getElementById('cron-edit-command').value = j.command;
+                document.getElementById('cron-edit-schedule').value = j.schedule;
+                document.getElementById('cron-edit-working_dir').value = j.working_dir || '';
+                document.getElementById('cron-edit-timeout').value = j.timeout || 300;
+                document.getElementById('cron-edit-enabled').checked = j.enabled;
+                document.getElementById('cron-edit-env_file').value = j.env_file || '';
+                document.getElementById('cron-edit-env_vars').value = envVarsToText(j.env_vars);
+                showModal('cron-edit-modal');
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        document.getElementById('cron-edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const name = form.name.value;
+
+            try {
+                await api('PUT', `/cron/${name}`, {
+                    command: form.command.value,
+                    schedule: form.schedule.value,
+                    working_dir: form.working_dir.value || null,
+                    timeout: parseInt(form.timeout.value) || 300,
+                    enabled: form.enabled.checked,
+                    env_file: form.env_file.value || null,
+                    env_vars: parseEnvVars(form.env_vars.value),
+                });
+                hideModal('cron-edit-modal');
+                await loadCronJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        });
+
+        async function deleteCronJob(name) {
+            if (!confirm(`Delete cron job "${name}"?`)) return;
+            try {
+                await api('DELETE', `/cron/${name}`);
+                await loadCronJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function runCronJobNow(name) {
+            try {
+                const res = await api('POST', `/cron/${name}/run`);
+                if (res.status === 'already_running') {
+                    alert(`${name} is already running`);
+                } else {
+                    alert(`Started ${name}`);
+                }
+                await loadCronJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function showCronExecutions(name) {
+            currentCronJob = name;
+            document.getElementById('cron-executions-title').textContent = name;
+            showModal('cron-executions-modal');
+            await refreshCronExecutions();
+        }
+
+        async function refreshCronExecutions() {
+            if (!currentCronJob) return;
+            try {
+                const execs = await api('GET', `/cron/${currentCronJob}/executions?limit=50`);
+                if (!execs.length) {
+                    document.getElementById('cron-executions-content').innerHTML = '<p class="text-gray-600">No executions yet</p>';
+                    return;
+                }
+
+                document.getElementById('cron-executions-content').innerHTML = execs.map(e => `
+                    <div class="bg-[#111] border-l-2 ${e.success ? 'border-l-green-500' : 'border-l-red-500'} border border-gray-800 p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm ${e.success ? 'text-green-400' : 'text-red-400'}">${e.success ? 'Success' : 'Failed'} (exit ${e.exit_code})</span>
+                            <div class="flex items-center gap-3 text-xs text-gray-500 font-mono">
+                                <span>${e.duration_seconds ? e.duration_seconds.toFixed(1) + 's' : '-'}</span>
+                                <span>${formatTime(e.started_at)}</span>
+                            </div>
+                        </div>
+                        ${e.cpu_percent || e.memory_mb ? `
+                        <div class="text-xs text-gray-500 mb-2">CPU: ${e.cpu_percent?.toFixed(1) || 0}% | Mem: ${e.memory_mb?.toFixed(1) || 0}MB</div>
+                        ` : ''}
+                        ${e.fix_attempted ? `<div class="text-xs ${e.fix_success ? 'text-green-400' : 'text-yellow-400'} mb-2">Auto-fix ${e.fix_success ? 'succeeded' : 'attempted'}</div>` : ''}
+                        ${e.stdout ? `<pre class="text-xs text-gray-400 whitespace-pre-wrap max-h-24 overflow-auto mb-2">${escapeHtml(e.stdout.slice(0, 1000))}</pre>` : ''}
+                        ${e.stderr ? `<pre class="text-xs text-red-400 whitespace-pre-wrap max-h-24 overflow-auto">${escapeHtml(e.stderr.slice(0, 1000))}</pre>` : ''}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('cron-executions-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        // Schedule preview for cron register form
+        const scheduleInput = document.querySelector('#cron-register-form input[name="schedule"]');
+        if (scheduleInput) {
+            let debounceTimer;
+            scheduleInput.addEventListener('input', async (e) => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(async () => {
+                    const schedule = e.target.value.trim();
+                    if (!schedule) {
+                        document.getElementById('cron-schedule-preview').textContent = '';
+                        return;
+                    }
+                    try {
+                        const res = await api('GET', `/cron/validate?schedule=${encodeURIComponent(schedule)}`);
+                        if (res.valid) {
+                            document.getElementById('cron-schedule-preview').textContent = res.description;
+                            document.getElementById('cron-schedule-preview').classList.remove('text-red-400');
+                            document.getElementById('cron-schedule-preview').classList.add('text-gray-500');
+                        } else {
+                            document.getElementById('cron-schedule-preview').textContent = res.message;
+                            document.getElementById('cron-schedule-preview').classList.remove('text-gray-500');
+                            document.getElementById('cron-schedule-preview').classList.add('text-red-400');
+                        }
+                    } catch (e) {
+                        document.getElementById('cron-schedule-preview').textContent = 'Error validating';
+                    }
+                }, 300);
+            });
+        }
+
+        // Initialize
+        updateStatus();
+        loadProjects();
+        statusInterval = setInterval(updateStatus, 3000); // Update every 3 seconds
+    </script>
+</body>
+</html>
