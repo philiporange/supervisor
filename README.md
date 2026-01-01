@@ -5,8 +5,10 @@ A unified service manager for Python/FastAPI projects with process supervision, 
 ## Installation
 
 ```bash
-# Install dependencies
 cd /home/sam/Code/supervisor
+pip install -e .
+
+# Or install dependencies only
 pip install -r requirements.txt
 
 # Install systemd service
@@ -20,6 +22,14 @@ sudo systemctl start supervisor
 ```
 
 ## Usage
+
+```bash
+# Run directly
+supervisor
+
+# Or via python module
+python -m supervisor
+```
 
 Dashboard available at http://localhost:9900
 
@@ -209,6 +219,38 @@ All data stored in `~/.supervisor/`:
 - `supervisor.log` - Supervisor logs (with rotation, max 10MB x 5 files)
 - `logs/{service}/` - Per-service log files
 - `backups/{service}/` - Code backups before auto-fix (keeps last 10)
+
+## Project Structure
+
+```
+supervisor/
+├── __init__.py       # Package exports, version
+├── __main__.py       # Entry point for python -m supervisor
+├── main.py           # FastAPI app, API endpoints, lifespan management
+├── config.py         # Configuration from environment variables
+├── models.py         # Peewee database models
+├── process.py        # Process manager for starting/stopping services
+├── monitor.py        # Resource monitoring and metrics collection
+├── cron.py           # Cron job scheduler and execution
+├── caddy.py          # Caddy reverse proxy config generation
+├── fixer.py          # Auto-fix using Robot AI
+├── robot_integration.py  # Robot AI chat and onboarding
+├── jobs.py           # Background job manager
+├── templates/
+│   └── index.html    # Dashboard HTML template
+├── static/
+│   ├── styles.css    # Custom styles
+│   ├── core.js       # State, API, utilities, tabs, modals
+│   ├── services.js   # Service management and security scans
+│   ├── monitoring.js # Logs, metrics charts, fixes
+│   ├── jobs.js       # Background job views
+│   ├── caddy.js      # Caddy config display
+│   ├── chat.js       # AI chat interface
+│   └── cron.js       # Cron job management
+└── prompts/
+    ├── onboard.md    # AI onboarding prompt
+    └── security_scan.md  # Security scan prompt
+```
 
 ## License
 

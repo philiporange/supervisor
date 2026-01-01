@@ -1,0 +1,72 @@
+/**
+ * Supervisor dashboard styles.
+ * Custom styles for the service manager UI including status indicators,
+ * context menus, animations, chat interface, and scrollbar customization.
+ */
+
+body { background: #080808; }
+.status-running { box-shadow: 0 0 0 2px #22c55e; }
+.status-stopped { box-shadow: 0 0 0 2px #ef4444; }
+.status-warning { box-shadow: 0 0 0 2px #f59e0b; }
+.context-menu { position: fixed; z-index: 1000; }
+.pulse-dot { animation: pulse 2s infinite; }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* Chat input container */
+.chat-input-container {
+    padding: 12px 16px;
+    background: #0a0a0a;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    transition: all 0.15s ease;
+}
+.chat-input-container:focus-within {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15), 0 0 20px rgba(59,130,246,0.1);
+}
+.chat-input-container.processing {
+    animation: rainbow-glow 3s linear infinite;
+}
+@keyframes rainbow-glow {
+    0% { border-color: #3b82f6; box-shadow: 0 0 15px -3px rgba(59,130,246,0.4); }
+    25% { border-color: #8b5cf6; box-shadow: 0 0 15px -3px rgba(139,92,246,0.4); }
+    50% { border-color: #ec4899; box-shadow: 0 0 15px -3px rgba(236,72,153,0.4); }
+    75% { border-color: #10b981; box-shadow: 0 0 15px -3px rgba(16,185,129,0.4); }
+    100% { border-color: #3b82f6; box-shadow: 0 0 15px -3px rgba(59,130,246,0.4); }
+}
+.chat-send-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: #3b82f6;
+    color: white;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+.chat-send-btn:hover { background: #60a5fa; transform: scale(1.02); }
+.chat-send-btn:active { transform: scale(0.98); }
+.chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.chat-send-btn.stop { background: #ef4444; }
+.chat-send-btn.stop:hover { background: #f87171; }
+
+/* Chat messages */
+.chat-message {
+    padding: 16px 20px;
+    border-radius: 10px;
+    animation: fadeUp 0.2s ease;
+}
+.chat-message:hover { background: rgba(255,255,255,0.02); }
+.chat-message.user { background: rgba(59,130,246,0.08); }
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
