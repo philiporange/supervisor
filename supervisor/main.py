@@ -640,6 +640,7 @@ def _service_response(service: Service) -> dict:
 class OnboardRequest(BaseModel):
     project: str = Field(..., description="Project name (in ~/Code/) or full path")
     model: str = Field("opus", description="AI model to use")
+    port: Optional[int] = Field(None, description="Requested port number")
 
 
 class ChatRequest(BaseModel):
@@ -663,6 +664,7 @@ async def onboard_project(data: OnboardRequest):
         run_robot_onboard,
         data.project,
         data.model,
+        data.port,
     )
 
     return {"job_id": job.id, "status": "started", "project": data.project}

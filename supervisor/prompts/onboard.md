@@ -5,6 +5,7 @@ You are onboarding a project to the Supervisor service manager. Your task is to 
 ## Project Information
 - Project path: {project_path}
 - Project name: {project_name}
+{requested_port}
 
 ## Currently Registered Services
 {existing_services}
@@ -18,7 +19,7 @@ You are onboarding a project to the Supervisor service manager. Your task is to 
    - Check pyproject.toml for `[project.scripts]` entry points
    - Check for run scripts, Makefiles, docker-compose, or README instructions
 
-2. **Choose a port** that does not conflict with existing services (listed above). If the project has a default port that is already taken, pick the next available port.
+2. **Choose a port.** {port_instruction}
 
 3. **Register with Supervisor** by making an API call:
    ```bash

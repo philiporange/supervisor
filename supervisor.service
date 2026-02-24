@@ -10,6 +10,7 @@ ExecStart=/usr/bin/python3 /home/sam/Code/supervisor/run.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/sam/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=multi-user.target

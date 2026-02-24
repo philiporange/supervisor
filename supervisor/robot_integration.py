@@ -40,17 +40,29 @@ def get_existing_services_context() -> str:
     return "\n".join(lines)
 
 
-def get_onboard_prompt(project_path: str, project_name: str) -> str:
+def get_onboard_prompt(project_path: str, project_name: str, port: int = None) -> str:
     """Load and format the onboard prompt template with live service context."""
     template_path = PROMPTS_DIR / "onboard.md"
     if not template_path.exists():
         raise FileNotFoundError(f"Onboard prompt template not found: {template_path}")
+
+    if port:
+        requested_port = f"- Requested port: {port}"
+        port_instruction = f"Use port {port} as requested by the user."
+    else:
+        requested_port = ""
+        port_instruction = (
+            "Pick a port that does not conflict with existing services (listed above). "
+            "If the project has a default port that is already taken, pick the next available port."
+        )
 
     template = template_path.read_text()
     return template.format(
         project_path=project_path,
         project_name=project_name,
         existing_services=get_existing_services_context(),
+        requested_port=requested_port,
+        port_instruction=port_instruction,
     )
 
 
@@ -81,6 +93,7 @@ def resolve_project_path(project: str) -> tuple[str, str]:
 async def run_robot_onboard(
     project: str,
     model: str = "opus",
+    port: int = None,
 ) -> dict:
     """
     Run robot to onboard a project to supervisor.
@@ -88,12 +101,13 @@ async def run_robot_onboard(
     Args:
         project: Project name or path
         model: Model to use (default: opus)
+        port: Optional requested port number
 
     Returns:
         Dict with success status and output
     """
     project_path, project_name = resolve_project_path(project)
-    prompt = get_onboard_prompt(project_path, project_name)
+    prompt = get_onboard_prompt(project_path, project_name, port)
 
     logger.info(f"Onboarding project: {project_name} from {project_path}")
 
