@@ -71,7 +71,7 @@ To set ports or other configuration, pass them as explicit command-line argument
   `docker-compose up`
 
 - Always set `working_dir` to the project path
-- Include the project directory in `watch_dirs`
+- Include the project directory in `watch_dirs` (used for disk usage tracking, not file-watching)
 
 ## Data Directory
 
@@ -79,8 +79,10 @@ If the project uses sqlite or persistent data, the convention is `~/.{{project_n
 
 ## Output
 
-After registering and verifying, provide a brief summary:
+After registering and verifying, provide a brief factual summary:
 - The command being used
 - The port assigned
 - Whether the service started successfully
 - Any issues encountered
+
+Do not describe capabilities that Supervisor does not have. Supervisor manages process lifecycle (start/stop/restart) and monitors resource usage. It does not do file-watching restarts.

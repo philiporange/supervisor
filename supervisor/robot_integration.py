@@ -78,7 +78,7 @@ def resolve_project_path(project: str) -> tuple[str, str]:
     """
     # If it's just a name, assume ~/Code/<name>
     if "/" not in project and not project.startswith("~"):
-        project_path = CODE_DIR / project
+        project_path = (CODE_DIR / project).resolve()
         project_name = project
     else:
         project_path = Path(project).expanduser().resolve()
