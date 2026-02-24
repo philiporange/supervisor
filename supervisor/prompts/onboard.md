@@ -1,61 +1,85 @@
 # Project Onboarding Prompt
 
-You are onboarding a project to the Supervisor service manager. Your task is to analyze the project and register it with the supervisor API.
+You are onboarding a project to the Supervisor service manager. Your task is to analyze the project and register it as a running service.
 
 ## Project Information
 - Project path: {project_path}
 - Project name: {project_name}
 
+## Currently Registered Services
+{existing_services}
+
 ## Your Tasks
 
 1. **Analyze the project** to determine:
    - The main entry point (look for run.py, main.py, app.py, server.py, or similar)
-   - The command needed to run it (e.g., `python run.py`, `uvicorn app:app`)
-   - The port it runs on (check for uvicorn, FastAPI, Flask config, or command line args)
-   - Any dependencies or setup needed
+   - The command needed to run it
+   - The port it runs on
+   - Check pyproject.toml for `[project.scripts]` entry points
+   - Check for run scripts, Makefiles, docker-compose, or README instructions
 
-2. **Check for existing configuration**:
-   - Look for run scripts, Makefiles, docker-compose, or README instructions
-   - Check pyproject.toml, setup.py, or requirements.txt for entry points
+2. **Choose a port** that does not conflict with existing services (listed above). If the project has a default port that is already taken, pick the next available port.
 
 3. **Register with Supervisor** by making an API call:
    ```bash
    curl -X POST http://localhost:9900/api/services \
      -H "Content-Type: application/json" \
-     -d '{
+     -d '{{
        "name": "{project_name}",
-       "command": "<detected command>",
+       "command": "<command>",
        "working_dir": "{project_path}",
-       "port": <detected port or null>,
+       "port": <port>,
        "enabled": true,
        "watch_dirs": ["{project_path}"]
-     }'
+     }}'
    ```
 
-4. **Configure data directory** if the project uses sqlite/data:
-   - The default data directory should be `~/.{project_name}/`
-   - If the project has a config.py or similar, check if it already uses this pattern
-   - If not, suggest environment variables or config changes to use `~/.{project_name}/` for:
-     - Database files (*.db, *.sqlite)
-     - Log files
-     - Cache directories
-     - Any other persistent data
+4. **Verify the service started** by checking:
+   ```bash
+   curl -s http://localhost:9900/api/services/{project_name}
+   ```
+   If `"running": false`, check the logs:
+   ```bash
+   curl -s http://localhost:9900/api/services/{project_name}/logs?limit=20
+   ```
+   Diagnose the failure, fix the command, update the service, and retry.
 
-## Guidelines
+## Command Execution Constraints
 
-- If the project already has a clear run command, use it
-- For FastAPI/uvicorn projects, prefer: `uvicorn <module>:app --host 0.0.0.0 --port <port>`
-- For Flask projects, prefer: `python -m flask run --host 0.0.0.0 --port <port>`
-- Default to port 8000 if not specified, but check if it's already in use
+Commands are executed directly via `subprocess.Popen` without a shell. This means:
+
+- **No inline environment variables**: `MY_VAR=value command` will NOT work. The `MY_VAR=value` part is treated as the executable name, causing the command to fail.
+- **No shell operators**: Pipes (`|`), redirects (`>`), chaining (`&&`), and subshells do not work.
+- **Exception**: Commands starting with `cd ` are run through a shell.
+
+To set ports or other configuration, pass them as explicit command-line arguments rather than environment variables.
+
+## Command Guidelines
+
+- For **FastAPI/uvicorn** projects, always use:
+  `python -m uvicorn <package>.server:app --host 0.0.0.0 --port <port>`
+  Even if the project has an entry point script (in pyproject.toml or run.py) that internally calls uvicorn, use the uvicorn command directly so the port can be set explicitly via `--port`. Check server.py (or the main module) for the correct `app` object path.
+
+- For **Flask** projects:
+  `python -m flask run --host 0.0.0.0 --port <port>`
+
+- For projects with a **run.py** that takes port arguments:
+  `python {project_path}/run.py --port <port>`
+
+- For **docker-compose** projects:
+  `docker-compose up`
+
 - Always set `working_dir` to the project path
-- Include the project directory in `watch_dirs` for disk monitoring
+- Include the project directory in `watch_dirs`
+
+## Data Directory
+
+If the project uses sqlite or persistent data, the convention is `~/.{{project_name}}/` for databases, logs, and cache. If the project already follows this pattern, no changes are needed.
 
 ## Output
 
-After analyzing and registering, provide a summary:
-- What command will be used
-- What port the service will run on
-- Any configuration changes suggested
-- Confirmation that the service was registered
-
-If there are any issues (missing dependencies, unclear entry point, etc.), explain them and ask for clarification.
+After registering and verifying, provide a brief summary:
+- The command being used
+- The port assigned
+- Whether the service started successfully
+- Any issues encountered

@@ -3,7 +3,8 @@ Robot AI integration for project onboarding, security scanning, and interactive 
 
 Uses the robot library to run AI agents for analyzing projects,
 onboarding them to supervisor, performing security assessments,
-and providing interactive assistance.
+and providing interactive assistance. The onboard prompt is dynamically
+populated with existing service/port context so the AI avoids conflicts.
 """
 
 import asyncio
@@ -19,8 +20,28 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 CODE_DIR = Path.home() / "Code"
 
 
+def get_existing_services_context() -> str:
+    """Build a summary of currently registered services and their ports."""
+    from .models import Service
+
+    services = Service.select()
+    if not services:
+        return "No services are currently registered."
+
+    lines = []
+    for s in services:
+        status = "enabled" if s.enabled else "disabled"
+        port_str = str(s.port) if s.port else "no port"
+        lines.append(f"- {s.name}: port {port_str} ({status})")
+
+    used_ports = sorted(s.port for s in services if s.port)
+    lines.append(f"\nPorts already in use: {', '.join(str(p) for p in used_ports)}")
+
+    return "\n".join(lines)
+
+
 def get_onboard_prompt(project_path: str, project_name: str) -> str:
-    """Load and format the onboard prompt template."""
+    """Load and format the onboard prompt template with live service context."""
     template_path = PROMPTS_DIR / "onboard.md"
     if not template_path.exists():
         raise FileNotFoundError(f"Onboard prompt template not found: {template_path}")
@@ -29,6 +50,7 @@ def get_onboard_prompt(project_path: str, project_name: str) -> str:
     return template.format(
         project_path=project_path,
         project_name=project_name,
+        existing_services=get_existing_services_context(),
     )
 
 
