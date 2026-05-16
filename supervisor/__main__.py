@@ -1,23 +1,12 @@
 """
-Entry point for running supervisor via `python -m supervisor`.
+Entry point for running supervisor via `python -m supervisor` or the
+`supervisor` console script.
 
-Starts the FastAPI server with uvicorn.
+Delegates to the CLI parser which handles subcommands (status, start, stop,
+etc.) and falls back to starting the server when no subcommand is given.
 """
 
-import uvicorn
-
-from .config import HOST, PORT
-
-
-def main():
-    """Run the supervisor server."""
-    uvicorn.run(
-        "supervisor.main:app",
-        host=HOST,
-        port=PORT,
-        reload=False,
-    )
-
+from .cli import main
 
 if __name__ == "__main__":
     main()
