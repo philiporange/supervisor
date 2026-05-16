@@ -203,10 +203,10 @@ Environment variables (or `.env` file):
 | CADDY_BASE_DOMAIN | ph1l.uk | Base domain for subdomain routing |
 | CADDY_PORT | 60443 | Port for Caddy routing |
 | CADDY_SUPERVISOR_FILE | /etc/caddy/supervisor.conf | Path to supervisor Caddy config |
-| MONITOR_INTERVAL | 60 | Metrics collection interval (seconds) |
+| MONITOR_INTERVAL | 300 | Metrics collection interval (seconds) |
 | LOG_MAX_BYTES | 10485760 | Max log file size (10MB) |
 | LOG_BACKUP_COUNT | 5 | Number of rotated log files to keep |
-| LOG_RETENTION_DAYS | 7 | Days to keep logs in database |
+| LOG_RETENTION_DAYS | 3 | Days to keep logs in database |
 | AUTOFIX_ENABLED | true | Enable Robot auto-fix |
 | AUTOFIX_TIMEOUT | 300 | Auto-fix timeout (seconds) |
 | MAX_RESTART_ATTEMPTS | 3 | Max restarts before giving up |

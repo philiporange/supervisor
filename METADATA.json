@@ -1,83 +1,102 @@
 {
   "name": "supervisor",
-  "short_description": "Unified service manager for Python/FastAPI projects with process supervision, cron scheduling, resource monitoring, auto-fix capabilities via Robot AI, and Caddy reverse proxy integration.",
-  "long_description": "Supervisor is a comprehensive service management platform designed for Python and FastAPI projects. It provides unified process management with features including automatic crash recovery and graceful shutdown, scheduled task execution via cron expressions with full execution history, real-time monitoring of CPU/memory/disk resources per service and job, AI-powered auto-fix capabilities using Robot agents to diagnose and fix errors in code, security scanning for exposed services, project onboarding through AI analysis, interactive chat assistance, and Caddy reverse proxy integration for automatic subdomain-based routing. The system stores all data in SQLite with comprehensive logging and supports background job execution for long-running operations. It exposes a complete REST API and includes a web dashboard for visual control and monitoring.",
+  "short_description": "Unified service manager for Python/FastAPI projects with process supervision, cron scheduling, monitoring, and Caddy integration.",
+  "long_description": "Supervisor is a comprehensive service management platform designed for Python and FastAPI projects. It provides process supervision with automatic crash recovery, cron job scheduling with execution history tracking, real-time resource monitoring (CPU/memory/disk usage), AI-powered auto-fix capabilities using Robot, security scanning for exposed services, and Caddy reverse proxy integration with subdomain-based routing. The system includes a web dashboard at port 9900 for management and monitoring, persistent SQLite database for logs and metrics, and background job execution for long-running operations. Projects can be onboarded via AI analysis which automatically determines their run configuration, and the system supports live log viewing, metrics visualization, and service control from a unified interface.",
   "keywords": [
-    "service-manager",
+    "service-management",
     "process-supervision",
-    "cron-scheduler",
+    "cron-scheduling",
     "resource-monitoring",
-    "auto-fix",
-    "ai-integration",
-    "robot-ai",
-    "caddy",
-    "reverse-proxy",
     "fastapi",
     "python",
-    "crash-recovery",
+    "auto-fix",
+    "ai-powered",
+    "caddy",
+    "reverse-proxy",
+    "web-dashboard",
     "log-management",
-    "job-tracking",
-    "security-scanning",
-    "system-administration",
-    "devops",
-    "api-server",
-    "web-dashboard"
+    "metrics-tracking",
+    "crash-recovery",
+    "background-jobs"
   ],
-  "primary_language": "Python",
+  "primary_language": "python",
   "languages": [
-    "Python",
-    "HTML",
-    "JavaScript",
-    "CSS"
+    "python",
+    "javascript",
+    "html",
+    "css"
   ],
   "frameworks": [
-    "FastAPI",
-    "Uvicorn",
-    "Peewee ORM",
-    "Jinja2",
-    "Caddy",
-    "croniter"
+    "fastapi",
+    "uvicorn",
+    "peewee",
+    "jinja2",
+    "pydantic",
+    "psutil",
+    "croniter",
+    "httpx",
+    "caddy"
   ],
   "modules": [
     {
       "path": "supervisor/main.py",
-      "description": "FastAPI application serving REST API endpoints for service management, cron jobs, auto-fixes, logs, metrics, Caddy configuration, and project onboarding with SSE streaming for chat."
+      "description": "FastAPI application with REST API endpoints for service/cron management, log viewing, metrics, auto-fix triggers, and Caddy configuration."
     },
     {
       "path": "supervisor/process.py",
-      "description": "Process manager handling starting, stopping, and restarting supervised services with crash detection, automatic recovery, and stdout/stderr log capture."
-    },
-    {
-      "path": "supervisor/models.py",
-      "description": "Peewee ORM database models for services, log entries, resource metrics, auto-fix attempts, and cron job schedules with execution history."
-    },
-    {
-      "path": "supervisor/config.py",
-      "description": "Configuration management using environment variables with sensible defaults for server, logging, Caddy, monitoring, and data storage paths."
+      "description": "Process manager for starting, stopping, and restarting services with stdout/stderr capture, crash detection, and automatic restart with exponential backoff."
     },
     {
       "path": "supervisor/monitor.py",
-      "description": "Resource monitoring subsystem that periodically collects CPU, memory, and disk usage statistics and handles cleanup of old logs, metrics, and cron records."
+      "description": "Resource monitoring system that periodically collects CPU, memory, and disk usage statistics and manages cleanup of old logs and metrics."
     },
     {
       "path": "supervisor/cron.py",
-      "description": "Cron job scheduler using croniter expressions that executes scheduled tasks with resource tracking, execution history, and support for triggering auto-fixes on failures."
+      "description": "Cron job scheduler and executor that manages periodic task execution based on cron expressions with execution history and resource tracking."
+    },
+    {
+      "path": "supervisor/models.py",
+      "description": "Peewee ORM database models for services, logs, metrics, cron jobs, fix attempts, and execution history."
+    },
+    {
+      "path": "supervisor/config.py",
+      "description": "Configuration management using environment variables with sensible defaults for paths, server settings, Caddy, monitoring intervals, and auto-fix behavior."
     },
     {
       "path": "supervisor/fixer.py",
-      "description": "Auto-fix integration using Robot AI agents to detect and fix errors in service source code with backup/restore functionality and cron job error recovery."
-    },
-    {
-      "path": "supervisor/caddy.py",
-      "description": "Caddy reverse proxy configuration generator supporting subdomain-based routing for supervised services with admin API integration for reloading."
+      "description": "Auto-fix integration using Robot AI to diagnose and fix service errors with automatic backup/restore capability and fix attempt tracking."
     },
     {
       "path": "supervisor/robot_integration.py",
-      "description": "Robot AI integration for project onboarding, security scanning, and interactive chat assistance using prompt templates and subprocess execution."
+      "description": "Robot AI integration for project onboarding, security scanning, and interactive chat assistance with prompt templating and service context."
+    },
+    {
+      "path": "supervisor/caddy.py",
+      "description": "Caddy reverse proxy configuration generation with subdomain-based routing and admin API communication for live config reloading."
     },
     {
       "path": "supervisor/jobs.py",
-      "description": "Background job tracking system for running blocking operations like auto-fixes in separate threads with status monitoring and result storage."
+      "description": "Background job tracking system for async operation status monitoring with job state management and result persistence."
+    },
+    {
+      "path": "supervisor/static/core.js",
+      "description": "Frontend core utilities including state management, API client, tab/modal handling, and general UI utilities."
+    },
+    {
+      "path": "supervisor/static/services.js",
+      "description": "Service management UI for starting, stopping, restarting services and triggering security scans."
+    },
+    {
+      "path": "supervisor/static/monitoring.js",
+      "description": "Monitoring UI for log viewing, real-time metrics charts, and fix attempt history display."
+    },
+    {
+      "path": "supervisor/static/cron.js",
+      "description": "Cron job management interface for scheduling, editing, and viewing execution history of periodic tasks."
+    },
+    {
+      "path": "supervisor/templates/index.html",
+      "description": "Main HTML dashboard template with tabs for services, monitoring, cron jobs, Caddy config, and AI chat interface."
     }
   ]
 }

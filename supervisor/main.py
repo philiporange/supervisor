@@ -8,6 +8,7 @@ via a /api/cron/tick endpoint called by system cron every minute.
 
 import asyncio
 import logging
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -63,13 +64,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting supervisor...")
 
-    # Wire up log callback to auto-fixer
+    # Wire up log callback to auto-fixer (with service model cache)
+    _service_cache: dict[str, Service] = {}
+
     def log_callback(service_name: str, level: str, message: str):
-        # Save to database
-        service = Service.get_or_none(Service.name == service_name)
+        if service_name not in _service_cache:
+            _service_cache[service_name] = Service.get_or_none(Service.name == service_name)
+        service = _service_cache[service_name]
         if service:
             LogEntry.create(service=service, level=level, message=message[:2000])
-        # Notify auto-fixer
         auto_fixer.on_log(service_name, level, message)
 
     process_manager.set_log_callback(log_callback)
@@ -81,7 +84,9 @@ async def lifespan(app: FastAPI):
     for service in Service.select().where(Service.enabled == True):
         if not process_manager.is_running(service.name):
             logger.info(f"Starting service: {service.name}")
-            process_manager.start(service)
+            success, message = process_manager.start(service)
+            if not success:
+                logger.error(f"Failed to start {service.name}: {message}")
 
     # Update next run times for all cron jobs
     for cron_job in CronJob.select().where(CronJob.enabled == True):
@@ -111,7 +116,7 @@ async def crash_monitor_loop():
             await process_manager.check_and_restart_crashed()
         except Exception as e:
             logger.error(f"Error in crash monitor: {e}")
-        await asyncio.sleep(10)
+        await asyncio.sleep(30)
 
 
 app = FastAPI(
@@ -234,8 +239,7 @@ async def dashboard(request: Request):
     services = []
     for service in Service.select():
         running = process_manager.is_running(service.name)
-        # Get metrics for all services (includes disk usage even when stopped)
-        metrics = resource_monitor.get_current_metrics(service.name)
+        metrics = resource_monitor.get_cached_metrics(service.name)
         services.append(
             {
                 "service": service,
@@ -279,7 +283,9 @@ async def create_service(data: ServiceCreate):
 
     # Start if enabled
     if service.enabled:
-        process_manager.start(service)
+        success, message = process_manager.start(service)
+        if not success:
+            logger.warning(f"Service created but failed to start: {message}")
 
     return _service_response(service)
 
@@ -357,9 +363,9 @@ async def start_service(name: str):
     if process_manager.is_running(name):
         return {"status": "already_running", "name": name}
 
-    success = process_manager.start(service)
+    success, message = process_manager.start(service)
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to start service")
+        raise HTTPException(status_code=500, detail=message)
 
     return {"status": "started", "name": name, "pid": process_manager.get_pid(name)}
 
@@ -388,9 +394,11 @@ async def restart_service(name: str):
     if not service:
         raise HTTPException(status_code=404, detail=f"Service '{name}' not found")
 
-    success = process_manager.restart(service)
+    process_manager.stop(service.name)
+    await asyncio.sleep(config.restart_delay)
+    success, message = process_manager.start(service)
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to restart service")
+        raise HTTPException(status_code=500, detail=message)
 
     return {"status": "restarted", "name": name, "pid": process_manager.get_pid(name)}
 
@@ -452,11 +460,11 @@ async def get_service_current_metrics(name: str):
 # Status overview
 @app.get("/api/status")
 async def get_status():
-    """Get overview of all services."""
+    """Get overview of all services. Reads from metrics cache for speed."""
     services = []
     for service in Service.select():
         running = process_manager.is_running(service.name)
-        metrics = resource_monitor.get_current_metrics(service.name) if running else None
+        metrics = resource_monitor.get_cached_metrics(service.name) if running else None
         services.append(
             {
                 "name": service.name,
@@ -550,7 +558,9 @@ async def restore_fix_backup(fix_id: int):
     fix.save()
 
     # Restart service
-    process_manager.restart(service)
+    success, message = process_manager.restart(service)
+    if not success:
+        logger.warning(f"Backup restored but service failed to restart: {message}")
 
     return {
         "status": "restored",
@@ -621,8 +631,8 @@ async def get_supervisor_logs(lines: int = Query(100, ge=1, le=1000)):
     """Get recent supervisor log entries."""
     try:
         with open(config.supervisor_log, "r") as f:
-            all_lines = f.readlines()
-            return {"lines": all_lines[-lines:], "total": len(all_lines)}
+            recent = deque(f, maxlen=lines)
+            return {"lines": list(recent), "total": lines}
     except FileNotFoundError:
         return {"lines": [], "total": 0}
 
@@ -665,6 +675,7 @@ async def onboard_project(data: OnboardRequest):
         data.project,
         data.model,
         data.port,
+        progress_callback=lambda progress: job_manager.update_progress(job.id, progress),
     )
 
     return {"job_id": job.id, "status": "started", "project": data.project}

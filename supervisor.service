@@ -6,11 +6,12 @@ After=network.target
 Type=simple
 User=sam
 WorkingDirectory=/home/sam/Code/supervisor
-ExecStart=/usr/bin/python3 /home/sam/Code/supervisor/run.py
+ExecStart=/home/sam/venv/bin/python3 /home/sam/Code/supervisor/run.py
 Restart=always
 RestartSec=5
+EnvironmentFile=/home/sam/.env
 Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/home/sam/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/sam/venv/bin:/home/sam/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=multi-user.target

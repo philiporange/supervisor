@@ -114,15 +114,16 @@
                         </button>
                     </div>
                     <div class="flex items-center gap-2 mt-2 pt-2 border-t border-gray-800/50 text-xs">
-                        <select id="chat-project" class="bg-transparent border-none text-gray-500 text-xs cursor-pointer hover:text-gray-300 outline-none">
-                            <option value="">No project</option>
-                        </select>
+                        <input id="chat-project" list="chat-project-list" placeholder="Project or path" class="bg-transparent border-none text-gray-500 text-xs outline-none placeholder-gray-600 min-w-32">
+                        <datalist id="chat-project-list"></datalist>
                         <span class="text-gray-700">•</span>
                         <select id="chat-model" class="bg-transparent border-none text-gray-500 text-xs cursor-pointer hover:text-gray-300 outline-none uppercase tracking-wide">
                             <option value="opus">Opus</option>
                             <option value="sonnet">Sonnet</option>
                             <option value="haiku">Haiku</option>
                         </select>
+                        <span class="text-gray-700">•</span>
+                        <input id="onboard-port" type="number" placeholder="Port" min="1" max="65535" class="bg-transparent border-none text-gray-500 text-xs outline-none w-12 placeholder-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none">
                         <span class="text-gray-700">•</span>
                         <button onclick="onboardProject()" class="text-gray-500 hover:text-blue-400 transition-colors">Onboard</button>
                         <span class="text-gray-700">•</span>

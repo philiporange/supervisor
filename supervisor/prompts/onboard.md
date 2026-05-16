@@ -21,7 +21,14 @@ You are onboarding a project to the Supervisor service manager. Your task is to 
 
 2. **Choose a port.** {port_instruction}
 
-3. **Register with Supervisor** by making an API call:
+3. **Check for duplicate** before registering:
+   ```bash
+   curl -s -o /dev/null -w "%{{http_code}}" http://localhost:9900/api/services/{project_name}
+   ```
+   If the response is `200`, the project is already registered — report this and stop.
+   Only proceed if the response is `404`.
+
+4. **Register with Supervisor** by making an API call:
    ```bash
    curl -X POST http://localhost:9900/api/services \
      -H "Content-Type: application/json" \
@@ -35,7 +42,7 @@ You are onboarding a project to the Supervisor service manager. Your task is to 
      }}'
    ```
 
-4. **Verify the service started** by checking:
+5. **Verify the service started** by checking:
    ```bash
    curl -s http://localhost:9900/api/services/{project_name}
    ```

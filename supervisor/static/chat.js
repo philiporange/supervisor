@@ -8,10 +8,11 @@ let chatAbortController = null;
 async function loadProjects() {
     try {
         const data = await api('GET', '/projects');
-        const select = document.getElementById('chat-project');
-        select.innerHTML = '<option value="">No project</option>';
+        const list = document.getElementById('chat-project-list');
+        list.innerHTML = '';
         for (const proj of data.projects) {
-            select.innerHTML += `<option value="${proj.name}">${proj.name}</option>`;
+            list.innerHTML += `<option value="${proj.name}"></option>`;
+            list.innerHTML += `<option value="${proj.path}"></option>`;
         }
     } catch (e) {
         console.error('Failed to load projects:', e);
@@ -27,12 +28,12 @@ function clearChat() {
     `;
 }
 
-function addChatMessage(role, content, isStreaming = false) {
+function addChatMessage(role, content, isStreaming = false, messageId = null) {
     const messages = document.getElementById('chat-messages');
     const isWelcome = messages.querySelector('.text-center');
     if (isWelcome) messages.innerHTML = '';
 
-    const msgId = isStreaming ? 'streaming-message' : `msg-${Date.now()}`;
+    const msgId = messageId || (isStreaming ? 'streaming-message' : `msg-${Date.now()}`);
     const existing = document.getElementById(msgId);
 
     if (existing) {
@@ -106,6 +107,7 @@ async function sendChatMessage() {
 
     chatAbortController = new AbortController();
     let responseContent = '';
+    let statusContent = '';
 
     try {
         const response = await fetch('/api/chat', {
@@ -134,15 +136,25 @@ async function sendChatMessage() {
                 if (!line.startsWith('data: ')) continue;
                 try {
                     const event = JSON.parse(line.slice(6));
-                    if (event.type === 'text' || event.type === 'content') {
+                    if (event.type === 'status') {
+                        statusContent += `${event.content || ''}\n`;
+                        addChatMessage('assistant', statusContent.trim(), true, 'streaming-status');
+                    } else if (event.type === 'text' || event.type === 'content') {
                         responseContent += (event.content || '') + '\n';
                         addChatMessage('assistant', responseContent.trim(), true);
                     } else if (event.type === 'result' && event.content) {
-                        responseContent = event.content;
+                        responseContent = statusContent.trim()
+                            ? `${statusContent.trim()}\n\n${event.content}`
+                            : event.content;
                         addChatMessage('assistant', responseContent, true);
                     } else if (event.type === 'error') {
-                        addChatMessage('assistant', `Error: ${event.content}`, true);
+                        const errorContent = statusContent.trim()
+                            ? `${statusContent.trim()}\n\nError: ${event.content}`
+                            : `Error: ${event.content}`;
+                        addChatMessage('assistant', errorContent, true);
                     } else if (event.type === 'done') {
+                        const statusMessage = document.getElementById('streaming-status');
+                        if (statusMessage) statusMessage.remove();
                         const streaming = document.getElementById('streaming-message');
                         if (streaming) streaming.id = `msg-${Date.now()}`;
                     }
@@ -169,16 +181,20 @@ async function onboardProject() {
     }
 
     const model = document.getElementById('chat-model').value;
+    const portInput = document.getElementById('onboard-port');
+    const port = portInput.value ? parseInt(portInput.value, 10) : null;
 
-    addChatMessage('user', `Onboard project: ${project}`);
+    addChatMessage('user', `Onboard project: ${project}${port ? ` (port ${port})` : ''}`);
     setChatLoading(true);
 
     try {
         const preview = await api('GET', `/onboard/preview?project=${encodeURIComponent(project)}`);
-        addChatMessage('assistant', `Analyzing project: ${preview.project_name}\nPath: ${preview.project_path}\nData dir: ${preview.data_dir}\n\nStarting onboard job...`);
+        addChatMessage('assistant', `Analyzing project: ${preview.project_name}\nPath: ${preview.project_path}\nData dir: ${preview.data_dir}\n\nStarting onboard job...`, false, `onboard-job-${Date.now()}`);
 
-        const result = await api('POST', '/onboard', { project, model });
-        addChatMessage('assistant', `Onboard job started: ${result.job_id}\n\nCheck the Jobs tab for progress.`);
+        const body = { project, model };
+        if (port) body.port = port;
+        const result = await api('POST', '/onboard', body);
+        addChatMessage('assistant', `Onboard job started: ${result.job_id}\n\nWaiting for agent progress...`, true, `onboard-status-${result.job_id}`);
 
         pollJobStatus(result.job_id);
     } catch (e) {
@@ -193,11 +209,17 @@ async function pollJobStatus(jobId) {
         try {
             const job = await api('GET', `/jobs/${jobId}`);
             if (job.status === 'completed') {
+                const progressMessage = document.getElementById(`onboard-status-${jobId}`);
+                if (progressMessage) progressMessage.remove();
                 addChatMessage('assistant', `Onboard completed!\n\n${job.result?.output || 'Project registered successfully.'}`);
                 await updateStatus();
             } else if (job.status === 'failed') {
+                const progressMessage = document.getElementById(`onboard-status-${jobId}`);
+                if (progressMessage) progressMessage.remove();
                 addChatMessage('assistant', `Onboard failed: ${job.error || 'Unknown error'}`);
             } else {
+                const progress = job.progress || 'Waiting for agent output...';
+                addChatMessage('assistant', `Onboard job ${jobId}\nStatus: ${job.status}\n\n${progress}`, true, `onboard-status-${jobId}`);
                 setTimeout(poll, 2000);
             }
         } catch (e) {

@@ -3,6 +3,8 @@ Process manager for supervised services.
 
 Handles starting, stopping, and restarting processes. Captures stdout/stderr
 to log files and monitors for crashes with automatic restart capability.
+Start and restart return (success, message) tuples so callers get actionable
+error details (missing working dir, bad command, permission errors, etc.).
 """
 
 import asyncio
@@ -49,41 +51,54 @@ class ProcessManager:
         """Set callback for log entries: callback(service_name, level, message)."""
         self._on_log = callback
 
-    def start(self, service: Service) -> bool:
-        """Start a service process. Returns True if started successfully."""
+    def start(self, service: Service) -> tuple[bool, str]:
+        """Start a service process. Returns (success, message)."""
         if self.is_running(service.name):
             logger.info(f"Service {service.name} is already running")
-            return True
+            return True, "already running"
+
+        # Determine working directory
+        working_dir = service.working_dir
+        if not working_dir:
+            parts = shlex.split(service.command)
+            for part in parts:
+                if part.endswith(".py") and "/" in part:
+                    working_dir = str(Path(part).parent)
+                    break
+
+        # Validate working directory
+        if working_dir and not Path(working_dir).is_dir():
+            msg = f"Working directory does not exist: {working_dir}"
+            logger.error(f"Failed to start service {service.name}: {msg}")
+            return False, msg
+
+        # Parse and validate command
+        if service.command.startswith("cd "):
+            shell = True
+            cmd = service.command
+        else:
+            shell = False
+            try:
+                cmd = shlex.split(service.command)
+            except ValueError as e:
+                msg = f"Invalid command syntax: {e}"
+                logger.error(f"Failed to start service {service.name}: {msg}")
+                return False, msg
+
+            executable = cmd[0]
+            if not shell and "/" in executable and not Path(executable).exists():
+                msg = f"Executable not found: {executable}"
+                logger.error(f"Failed to start service {service.name}: {msg}")
+                return False, msg
 
         try:
             # Create log directory for this service
             log_dir = config.logs_dir / service.name
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            # Determine working directory
-            working_dir = service.working_dir
-            if not working_dir:
-                # Try to extract from command
-                parts = shlex.split(service.command)
-                for part in parts:
-                    if part.endswith(".py") and "/" in part:
-                        working_dir = str(Path(part).parent)
-                        break
-
-            # Open log files
             stdout_log = open(log_dir / "stdout.log", "a")
             stderr_log = open(log_dir / "stderr.log", "a")
 
-            # Parse command
-            if service.command.startswith("cd "):
-                # Handle "cd /path && command" pattern
-                shell = True
-                cmd = service.command
-            else:
-                shell = False
-                cmd = shlex.split(service.command)
-
-            # Start process
             env = os.environ.copy()
             process = subprocess.Popen(
                 cmd,
@@ -92,7 +107,7 @@ class ProcessManager:
                 stderr=subprocess.PIPE,
                 cwd=working_dir,
                 env=env,
-                start_new_session=True,  # Create new process group
+                start_new_session=True,
             )
 
             with self._lock:
@@ -120,11 +135,20 @@ class ProcessManager:
             stderr_thread.start()
 
             logger.info(f"Started service {service.name} with PID {process.pid}")
-            return True
+            return True, "started"
 
+        except PermissionError:
+            msg = f"Permission denied executing: {service.command}"
+            logger.error(f"Failed to start service {service.name}: {msg}")
+            return False, msg
+        except FileNotFoundError:
+            msg = f"Command not found: {cmd[0] if isinstance(cmd, list) else cmd}"
+            logger.error(f"Failed to start service {service.name}: {msg}")
+            return False, msg
         except Exception as e:
-            logger.error(f"Failed to start service {service.name}: {e}")
-            return False
+            msg = str(e)
+            logger.error(f"Failed to start service {service.name}: {msg}")
+            return False, msg
 
     def stop(self, service_name: str, timeout: int = 10) -> bool:
         """Stop a service process. Returns True if stopped successfully."""
@@ -172,8 +196,8 @@ class ProcessManager:
             logger.error(f"Failed to stop service {service_name}: {e}")
             return False
 
-    def restart(self, service: Service) -> bool:
-        """Restart a service. Returns True if restarted successfully."""
+    def restart(self, service: Service) -> tuple[bool, str]:
+        """Restart a service. Returns (success, message)."""
         self.stop(service.name)
         time.sleep(config.restart_delay)
         return self.start(service)
@@ -235,8 +259,9 @@ class ProcessManager:
                     log_file.write(f"[{timestamp}] {decoded}\n")
                     log_file.flush()
 
-                    # Detect error level from content
-                    detected_level = level
+                    # Detect error level from content (ignore stream source —
+                    # many tools like Flask/uvicorn write normal output to stderr)
+                    detected_level = "info"
                     lower = decoded.lower()
                     if "error" in lower or "exception" in lower or "traceback" in lower:
                         detected_level = "error"
@@ -296,7 +321,10 @@ class ProcessManager:
 
                 await asyncio.sleep(config.restart_delay)
 
-                if self.start(service):
+                success, msg = self.start(service)
+                if not success:
+                    logger.error(f"Failed to restart crashed service {service_name}: {msg}")
+                if success:
                     with self._lock:
                         if service_name in self._processes:
                             self._processes[service_name].restart_count = (

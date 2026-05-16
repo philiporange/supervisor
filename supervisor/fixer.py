@@ -221,7 +221,9 @@ class AutoFixer:
                     logger.info(f"Auto-fix succeeded for {service_name}")
                     # Clear errors and restart service
                     self._recent_errors[service_name] = []
-                    process_manager.restart(service)
+                    success, msg = process_manager.restart(service)
+                    if not success:
+                        logger.warning(f"Fix applied but restart failed for {service_name}: {msg}")
                 else:
                     logger.warning(f"Auto-fix failed for {service_name}")
             except Exception as e:

@@ -58,8 +58,8 @@ class Config:
     caddy_supervisor_file: str = os.environ.get("CADDY_SUPERVISOR_FILE", "/etc/caddy/supervisor.conf")
 
     # Monitoring
-    monitor_interval: int = int(os.environ.get("MONITOR_INTERVAL", "60"))
-    log_retention_days: int = int(os.environ.get("LOG_RETENTION_DAYS", "7"))
+    monitor_interval: int = int(os.environ.get("MONITOR_INTERVAL", "300"))
+    log_retention_days: int = int(os.environ.get("LOG_RETENTION_DAYS", "3"))
 
     # Auto-fix
     autofix_enabled: bool = os.environ.get("AUTOFIX_ENABLED", "true").lower() == "true"

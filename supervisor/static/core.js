@@ -133,5 +133,5 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof loadProjects === 'function') loadProjects();
     statusInterval = setInterval(() => {
         if (typeof updateStatus === 'function') updateStatus();
-    }, 3000);
+    }, 10000);
 });

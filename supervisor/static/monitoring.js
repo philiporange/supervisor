@@ -26,7 +26,7 @@ function closeLogsModal() {
 function startLogsInterval() {
     stopLogsInterval();
     if (document.getElementById('logs-live').checked) {
-        logsInterval = setInterval(refreshServiceLogs, 1000);
+        logsInterval = setInterval(refreshServiceLogs, 3000);
     }
 }
 
@@ -115,7 +115,7 @@ async function loadSupervisorLogs() {
 function startSupervisorLogsInterval() {
     stopSupervisorLogsInterval();
     if (document.getElementById('supervisor-logs-live').checked) {
-        supervisorLogsInterval = setInterval(loadSupervisorLogs, 1000);
+        supervisorLogsInterval = setInterval(loadSupervisorLogs, 5000);
     }
 }
 
