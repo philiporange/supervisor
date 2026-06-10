@@ -11,8 +11,11 @@ async function updateStatus() {
         serviceHost = status.service_host || 'localhost';
         document.getElementById('running-count').textContent = status.running;
         document.getElementById('total-count').textContent = status.total;
-        renderHome();
-        renderServicesList();
+        // Don't re-render under an open context menu (re-render would orphan it)
+        if (document.getElementById('context-menu').classList.contains('hidden')) {
+            renderHome();
+            renderServicesList();
+        }
     } catch (e) {
         console.error('Status update failed:', e);
     }
@@ -46,11 +49,14 @@ function renderHome() {
                 <div class="text-xs text-gray-500 font-mono">
                     ${s.port ? ':' + s.port : 'no port'}
                 </div>
-                ${s.metrics ? `
+                ${s.running && s.metrics ? `
                 <div class="mt-2 text-xs text-gray-600 font-mono">
-                    ${s.running ? `CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB` : 'stopped'}
+                    CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB
                 </div>
-                ` : ''}
+                <div class="text-xs text-gray-600 font-mono">
+                    up ${formatUptime(s.metrics.uptime_seconds)}${s.metrics.restart_count ? ` | ${s.metrics.restart_count} restarts` : ''}
+                </div>
+                ` : (s.running ? '' : '<div class="mt-2 text-xs text-gray-600 font-mono">stopped</div>')}
             </a>
         `;
     }).join('');
@@ -80,7 +86,7 @@ function renderServicesList() {
                 <div class="flex items-center gap-4">
                     ${s.metrics && s.running ? `
                     <div class="text-xs text-gray-500 font-mono">
-                        CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB
+                        CPU ${s.metrics.cpu_percent}% | ${Math.round(s.metrics.memory_mb)}MB | up ${formatUptime(s.metrics.uptime_seconds)}
                     </div>
                     ` : ''}
                     <div class="flex gap-1">
@@ -153,38 +159,43 @@ async function ctxAction(action) {
 async function startService(name) {
     try {
         await api('POST', `/services/${name}/start`);
+        toast(`${name} started`, 'success');
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function stopService(name) {
     try {
         await api('POST', `/services/${name}/stop`);
+        toast(`${name} stopped`, 'success');
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function restartService(name) {
     try {
+        toast(`Restarting ${name}...`);
         await api('POST', `/services/${name}/restart`);
+        toast(`${name} restarted`, 'success');
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteService(name) {
     if (!confirm(`Delete "${name}"?`)) return;
     try {
         await api('DELETE', `/services/${name}`);
+        toast(`${name} deleted`, 'success');
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function triggerFix(name) {
     if (!confirm(`Trigger auto-fix for "${name}"?`)) return;
     try {
         const res = await api('POST', `/services/${name}/fix`);
-        alert(`Fix job started: ${res.job_id}`);
-    } catch (e) { alert('Error: ' + e.message); }
+        toast(`Fix job started: ${res.job_id}`, 'success');
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // Security Scan
@@ -349,7 +360,7 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
         hideModal('register-modal');
         form.reset();
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 });
 
 // Edit form
@@ -366,7 +377,7 @@ async function showEditModal(name) {
         document.getElementById('edit-expose_caddy').checked = s.expose_caddy;
         document.getElementById('edit-caddy_subdomain').value = s.caddy_subdomain || '';
         showModal('edit-modal');
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 document.getElementById('edit-form').addEventListener('submit', async (e) => {
@@ -387,5 +398,5 @@ document.getElementById('edit-form').addEventListener('submit', async (e) => {
         });
         hideModal('edit-modal');
         await updateStatus();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 });

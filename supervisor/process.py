@@ -2,7 +2,10 @@
 Process manager for supervised services.
 
 Handles starting, stopping, and restarting processes. Captures stdout/stderr
-to log files and monitors for crashes with automatic restart capability.
+to log files (with size-based rotation) and monitors for crashes with
+automatic restart capability. The crash restart counter resets after a
+period of stable uptime so a service that crashes occasionally over weeks
+isn't permanently given up on.
 Start and restart return (success, message) tuples so callers get actionable
 error details (missing working dir, bad command, permission errors, etc.).
 """
@@ -25,6 +28,10 @@ from .models import LogEntry, Service
 
 logger = logging.getLogger(__name__)
 
+# A service that ran at least this long before crashing gets its restart
+# counter reset, so max_restart_attempts only applies to rapid crash loops.
+STABLE_UPTIME_SECONDS = 600
+
 
 @dataclass
 class ProcessInfo:
@@ -42,7 +49,6 @@ class ProcessManager:
 
     def __init__(self):
         self._processes: dict[str, ProcessInfo] = {}
-        self._log_threads: dict[str, threading.Thread] = {}
         self._stop_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
         self._on_log: Callable[[str, str, str], None] = None
@@ -91,6 +97,8 @@ class ProcessManager:
                 logger.error(f"Failed to start service {service.name}: {msg}")
                 return False, msg
 
+        stdout_log = None
+        stderr_log = None
         try:
             # Create log directory for this service
             log_dir = config.logs_dir / service.name
@@ -139,16 +147,19 @@ class ProcessManager:
 
         except PermissionError:
             msg = f"Permission denied executing: {service.command}"
-            logger.error(f"Failed to start service {service.name}: {msg}")
-            return False, msg
         except FileNotFoundError:
             msg = f"Command not found: {cmd[0] if isinstance(cmd, list) else cmd}"
-            logger.error(f"Failed to start service {service.name}: {msg}")
-            return False, msg
         except Exception as e:
             msg = str(e)
-            logger.error(f"Failed to start service {service.name}: {msg}")
-            return False, msg
+
+        for f in (stdout_log, stderr_log):
+            if f:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+        logger.error(f"Failed to start service {service.name}: {msg}")
+        return False, msg
 
     def stop(self, service_name: str, timeout: int = 10) -> bool:
         """Stop a service process. Returns True if stopped successfully."""
@@ -185,9 +196,8 @@ class ProcessManager:
                 process.wait(timeout=5)
 
             with self._lock:
-                del self._processes[service_name]
-                if service_name in self._stop_events:
-                    del self._stop_events[service_name]
+                self._processes.pop(service_name, None)
+                self._stop_events.pop(service_name, None)
 
             logger.info(f"Stopped service {service_name}")
             return True
@@ -243,7 +253,11 @@ class ProcessManager:
         log_file,
         stop_event: threading.Event,
     ):
-        """Capture process output and write to log file and database."""
+        """Capture process output and write to log file and database.
+
+        Rotates the log file (keeping one .1 backup) when it exceeds
+        config.log_max_bytes so per-service logs don't grow unbounded.
+        """
         try:
             for line in iter(stream.readline, b""):
                 if stop_event.is_set():
@@ -253,6 +267,13 @@ class ProcessManager:
                     decoded = line.decode("utf-8", errors="replace").rstrip()
                     if not decoded:
                         continue
+
+                    # Rotate if the log file has grown too large
+                    if log_file.tell() > config.log_max_bytes:
+                        log_path = Path(log_file.name)
+                        log_file.close()
+                        log_path.replace(log_path.with_suffix(log_path.suffix + ".1"))
+                        log_file = open(log_path, "a")
 
                     # Write to log file
                     timestamp = datetime.now().isoformat()
@@ -293,50 +314,48 @@ class ProcessManager:
             ]
 
         for service_name in crashed:
-            logger.warning(f"Service {service_name} has crashed, attempting restart")
+            with self._lock:
+                info = self._processes.pop(service_name, None)
+                self._stop_events.pop(service_name, None)
+            if not info:
+                continue
 
-            # Get service from database
+            exit_code = info.process.poll()
+            uptime = (datetime.now() - info.started_at).total_seconds()
+            logger.warning(
+                f"Service {service_name} crashed (exit code {exit_code}, "
+                f"uptime {uptime:.0f}s), attempting restart"
+            )
+
             try:
                 service = Service.get(Service.name == service_name)
                 if not service.enabled:
                     logger.info(f"Service {service_name} is disabled, not restarting")
-                    with self._lock:
-                        del self._processes[service_name]
                     continue
 
-                # Check restart count
-                with self._lock:
-                    info = self._processes.get(service_name)
-                    if info and info.restart_count >= config.max_restart_attempts:
-                        logger.error(
-                            f"Service {service_name} exceeded max restart attempts, giving up"
-                        )
-                        del self._processes[service_name]
-                        continue
+                # A long stable run means this isn't a crash loop; start counting fresh
+                restart_count = 0 if uptime >= STABLE_UPTIME_SECONDS else info.restart_count
 
-                # Restart with backoff
-                with self._lock:
-                    if service_name in self._processes:
-                        del self._processes[service_name]
+                if restart_count >= config.max_restart_attempts:
+                    logger.error(
+                        f"Service {service_name} exceeded max restart attempts, giving up"
+                    )
+                    continue
 
                 await asyncio.sleep(config.restart_delay)
 
                 success, msg = self.start(service)
                 if not success:
                     logger.error(f"Failed to restart crashed service {service_name}: {msg}")
-                if success:
-                    with self._lock:
-                        if service_name in self._processes:
-                            self._processes[service_name].restart_count = (
-                                info.restart_count + 1 if info else 1
-                            )
-                            self._processes[service_name].last_restart = datetime.now()
+                    continue
+
+                with self._lock:
+                    if service_name in self._processes:
+                        self._processes[service_name].restart_count = restart_count + 1
+                        self._processes[service_name].last_restart = datetime.now()
 
             except Service.DoesNotExist:
                 logger.error(f"Service {service_name} not found in database")
-                with self._lock:
-                    if service_name in self._processes:
-                        del self._processes[service_name]
 
     def shutdown_all(self):
         """Stop all running processes."""

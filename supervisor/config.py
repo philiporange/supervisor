@@ -36,19 +36,19 @@ class Config:
     service_host: str = os.environ.get("SERVICE_HOST", "")
 
     def get_service_host(self) -> str:
-        """Get the host to use in service URLs."""
+        """Get the host to use in service URLs (auto-detection is cached)."""
         if self.service_host:
             return self.service_host
-        # Auto-detect local IP
+        # Auto-detect local IP once; this runs on every status poll otherwise
         import socket
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
+            self.service_host = s.getsockname()[0]
             s.close()
-            return ip
         except Exception:
-            return "localhost"
+            self.service_host = "localhost"
+        return self.service_host
 
     # Caddy
     caddy_admin_url: str = os.environ.get("CADDY_ADMIN_URL", "http://localhost:2019")

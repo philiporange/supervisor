@@ -177,9 +177,9 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 ## Features
 
 - **Process Management** - Start/stop/restart with graceful shutdown
-- **Crash Recovery** - Auto-restarts crashed services with backoff
+- **Crash Recovery** - Auto-restarts crashed services with backoff (restart counter resets after 10 minutes of stable uptime)
 - **Cron Scheduling** - Run scripts on cron schedules with execution history and resource tracking
-- **Log Capture** - Stores stdout/stderr in SQLite and log files
+- **Log Capture** - Stores stdout/stderr in SQLite and size-rotated log files
 - **Resource Monitoring** - Tracks CPU/memory/disk usage per service and cron job
 - **Auto-Fix** - Uses Robot to detect and fix errors in services and cron jobs (with backup/restore)
 - **Security Scanning** - AI-powered security analysis for Caddy-exposed services
@@ -204,12 +204,12 @@ Environment variables (or `.env` file):
 | CADDY_PORT | 60443 | Port for Caddy routing |
 | CADDY_SUPERVISOR_FILE | /etc/caddy/supervisor.conf | Path to supervisor Caddy config |
 | MONITOR_INTERVAL | 300 | Metrics collection interval (seconds) |
-| LOG_MAX_BYTES | 10485760 | Max log file size (10MB) |
+| LOG_MAX_BYTES | 10485760 | Max log file size before rotation, supervisor and per-service logs (10MB) |
 | LOG_BACKUP_COUNT | 5 | Number of rotated log files to keep |
 | LOG_RETENTION_DAYS | 3 | Days to keep logs in database |
 | AUTOFIX_ENABLED | true | Enable Robot auto-fix |
 | AUTOFIX_TIMEOUT | 300 | Auto-fix timeout (seconds) |
-| MAX_RESTART_ATTEMPTS | 3 | Max restarts before giving up |
+| MAX_RESTART_ATTEMPTS | 3 | Max rapid restarts before giving up (resets after stable uptime) |
 | RESTART_DELAY | 5 | Delay before restarting crashed services (seconds) |
 
 ## Data

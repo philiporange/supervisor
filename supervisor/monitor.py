@@ -4,6 +4,8 @@ Resource monitoring for supervised services and cron jobs.
 Collects CPU, memory, and disk usage in a background thread on a configurable
 interval and caches results in memory. API endpoints read from the cache
 instead of computing metrics live, keeping request handlers non-blocking.
+psutil.Process handles are kept between collection intervals so cpu_percent()
+measures usage since the previous interval (a fresh handle always reports 0.0).
 Handles cleanup of old log entries, metrics, and cron execution records.
 """
 
@@ -49,6 +51,18 @@ class ResourceMonitor:
         self._running = False
         self._task = None
         self._cache: dict[str, dict] = {}
+        # pid -> psutil.Process, reused across intervals so cpu_percent()
+        # has a previous sample to diff against
+        self._proc_handles: dict[int, psutil.Process] = {}
+
+    def _get_proc_handle(self, pid: int) -> psutil.Process:
+        """Get a cached psutil.Process for a pid, creating it if needed."""
+        proc = self._proc_handles.get(pid)
+        if proc is None or proc.pid != pid:
+            proc = psutil.Process(pid)
+            proc.cpu_percent(interval=None)  # Prime the CPU sample
+            self._proc_handles[pid] = proc
+        return proc
 
     async def start(self):
         """Start the monitoring loop."""
@@ -83,36 +97,45 @@ class ResourceMonitor:
             await asyncio.sleep(config.monitor_interval)
 
     def _collect_metrics_sync(self):
-        """Collect metrics for all enabled services (runs in thread pool)."""
-        for service in Service.select().where(Service.enabled == True):
+        """Collect metrics for all running services (runs in thread pool)."""
+        live_pids = set()
+
+        for service in Service.select():
             try:
+                pid = process_manager.get_pid(service.name)
+                if not pid:
+                    # Not running: drop stale cache so APIs don't report old numbers
+                    self._cache.pop(service.name, None)
+                    continue
+
                 cpu_percent = 0.0
                 memory_mb = 0.0
                 child_count = 0
 
-                # Get process metrics if running
-                pid = process_manager.get_pid(service.name)
-                if pid:
+                try:
+                    proc = self._get_proc_handle(pid)
+                    live_pids.add(pid)
+                    cpu_percent = proc.cpu_percent(interval=None)
+                    memory_mb = proc.memory_info().rss / 1024 / 1024
+
+                    # Also collect child processes
                     try:
-                        proc = psutil.Process(pid)
-                        cpu_percent = proc.cpu_percent(interval=None)
-                        memory_info = proc.memory_info()
-                        memory_mb = memory_info.rss / 1024 / 1024
+                        for child in proc.children(recursive=True):
+                            try:
+                                child_proc = self._get_proc_handle(child.pid)
+                                live_pids.add(child.pid)
+                                cpu_percent += child_proc.cpu_percent(interval=None)
+                                memory_mb += child_proc.memory_info().rss / 1024 / 1024
+                                child_count += 1
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
 
-                        # Also collect child processes
-                        try:
-                            children = proc.children(recursive=True)
-                            child_count = len(children)
-                            for child in children:
-                                cpu_percent += child.cpu_percent(interval=None)
-                                memory_mb += child.memory_info().rss / 1024 / 1024
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-
-                    except psutil.NoSuchProcess:
-                        logger.warning(f"Process for {service.name} no longer exists")
-                    except psutil.AccessDenied:
-                        logger.warning(f"Access denied for {service.name}")
+                except psutil.NoSuchProcess:
+                    logger.warning(f"Process for {service.name} no longer exists")
+                except psutil.AccessDenied:
+                    logger.warning(f"Access denied for {service.name}")
 
                 # Collect disk usage for watched directories
                 disk_mb = 0.0
@@ -149,6 +172,11 @@ class ResourceMonitor:
             except Exception as e:
                 logger.error(f"Error collecting metrics for {service.name}: {e}")
 
+        # Drop handles for processes that are gone
+        for pid in list(self._proc_handles):
+            if pid not in live_pids:
+                del self._proc_handles[pid]
+
     async def _cleanup_old_data(self):
         """Remove old log entries, metrics, and cron executions."""
         try:
@@ -179,9 +207,14 @@ class ResourceMonitor:
     def get_current_metrics(self, service_name: str) -> dict | None:
         """Get current resource usage for a service.
 
-        Returns cached metrics enriched with live uptime. Falls back to
-        minimal live data if cache is empty (first interval hasn't run yet).
+        Returns cached metrics enriched with live uptime, or minimal live data
+        if the cache is empty (first interval hasn't run yet). Returns None if
+        the service is not running.
         """
+        pid = process_manager.get_pid(service_name)
+        if not pid:
+            return None
+
         cached = self._cache.get(service_name)
         if cached:
             # Refresh uptime from live process info
@@ -192,7 +225,6 @@ class ResourceMonitor:
             return cached
 
         # Fallback: return minimal info without expensive computation
-        pid = process_manager.get_pid(service_name)
         info = process_manager.get_info(service_name)
         return {
             "pid": pid,

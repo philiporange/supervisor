@@ -219,9 +219,10 @@ class AutoFixer:
                 result = await self.attempt_fix(service, error_text)
                 if result.success:
                     logger.info(f"Auto-fix succeeded for {service_name}")
-                    # Clear errors and restart service
+                    # Clear errors and restart service. restart() blocks on
+                    # restart_delay, so keep it off the event loop.
                     self._recent_errors[service_name] = []
-                    success, msg = process_manager.restart(service)
+                    success, msg = await asyncio.to_thread(process_manager.restart, service)
                     if not success:
                         logger.warning(f"Fix applied but restart failed for {service_name}: {msg}")
                 else:
@@ -259,11 +260,12 @@ class AutoFixer:
                     success=False,
                 )
 
-            # Create backup before modifying code
+            # Create backup before modifying code (off the event loop: copying
+            # a whole project tree can take seconds)
             backup_path = None
             try:
-                backup_path = create_backup(working_dir, service.name)
-                cleanup_old_backups(service.name)
+                backup_path = await asyncio.to_thread(create_backup, working_dir, service.name)
+                await asyncio.to_thread(cleanup_old_backups, service.name)
             except Exception as e:
                 logger.warning(f"Failed to create backup for {service.name}: {e}")
 
@@ -396,11 +398,13 @@ The service command is: {service.command}
                 logger.info(f"No error output for cron job {cron_job.name}, skipping fix")
                 return False
 
-            # Create backup
+            # Create backup (off the event loop)
             backup_path = None
             try:
-                backup_path = create_backup(working_dir, f"cron_{cron_job.name}")
-                cleanup_old_backups(f"cron_{cron_job.name}")
+                backup_path = await asyncio.to_thread(
+                    create_backup, working_dir, f"cron_{cron_job.name}"
+                )
+                await asyncio.to_thread(cleanup_old_backups, f"cron_{cron_job.name}")
             except Exception as e:
                 logger.warning(f"Failed to create backup for cron job {cron_job.name}: {e}")
 

@@ -3,8 +3,11 @@ Cron job scheduler and executor for supervisor.
 
 Manages scheduled tasks that run periodically based on cron expressions.
 Each minute, the tick() method is called (triggered by system cron) to
-check which jobs should run and execute them with resource monitoring.
-Failed jobs can trigger Robot auto-fix attempts.
+check which jobs should run. execute() starts the process and records the
+execution synchronously, then monitors it in a background asyncio task so
+tick() and manual runs return immediately instead of blocking until the
+job finishes. Jobs that exceed their timeout have their process group
+killed. Failed jobs can trigger Robot auto-fix attempts.
 """
 
 import asyncio
@@ -13,7 +16,6 @@ import os
 import shlex
 import subprocess
 import threading
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,6 +27,9 @@ from .models import CronExecution, CronJob
 
 logger = logging.getLogger(__name__)
 
+# Cap on stdout/stderr stored per execution record
+MAX_OUTPUT_CHARS = 100_000
+
 
 class CronManager:
     """Manages scheduled cron job execution."""
@@ -33,6 +38,7 @@ class CronManager:
         self._running_jobs: dict[int, subprocess.Popen] = {}
         self._lock = threading.Lock()
         self._on_fix_needed: callable = None
+        self._monitor_tasks: set[asyncio.Task] = set()
 
     def set_fix_callback(self, callback: callable):
         """Set callback for triggering auto-fix: callback(cron_job, execution)."""
@@ -114,11 +120,15 @@ class CronManager:
 
     async def execute(self, job: CronJob) -> int | None:
         """
-        Execute a cron job and record the result.
+        Start a cron job and record the execution.
 
-        Returns the execution ID or None if failed to start.
+        The process is started synchronously (so the returned execution ID is
+        valid immediately), then monitored to completion in a background task.
+
+        Returns the execution ID or None if the job is already running.
         """
-        # Check if already running
+        # Check if already running. No awaits between this check and
+        # registering the process below, so concurrent callers can't race.
         with self._lock:
             if job.id in self._running_jobs:
                 logger.warning(f"Cron job {job.name} is already running, skipping")
@@ -167,17 +177,55 @@ class CronManager:
                 start_new_session=True,
             )
 
-            with self._lock:
-                self._running_jobs[job.id] = process
+        except Exception as e:
+            logger.error(f"Error executing cron job {job.name}: {e}")
+            execution.finished_at = datetime.now()
+            execution.exit_code = -1
+            execution.stderr = str(e)
+            execution.success = False
+            execution.save()
+            return execution.id
 
-            # Update job timestamps
-            job.last_run = datetime.now()
-            self.update_next_run(job)
+        with self._lock:
+            self._running_jobs[job.id] = process
 
-            # Monitor and wait for completion
-            stdout, stderr, metrics = await self._monitor_process(
-                process, job.timeout, job.name
-            )
+        # Update job timestamps
+        job.last_run = datetime.now()
+        self.update_next_run(job)
+
+        # Monitor to completion in the background; keep a reference so the
+        # task isn't garbage collected mid-flight
+        task = asyncio.create_task(self._run_to_completion(job, execution, process))
+        self._monitor_tasks.add(task)
+        task.add_done_callback(self._monitor_tasks.discard)
+
+        return execution.id
+
+    async def _run_to_completion(
+        self, job: CronJob, execution: CronExecution, process: subprocess.Popen
+    ):
+        """Monitor a started job, record the result, and trigger auto-fix."""
+        try:
+            timed_out = False
+            try:
+                stdout, stderr, metrics = await self._monitor_process(
+                    process, job.timeout, job.name
+                )
+            except subprocess.TimeoutExpired:
+                # Kill the whole process group, then collect what it wrote
+                timed_out = True
+                logger.error(f"Cron job {job.name} timed out after {job.timeout}s, killing")
+                self._kill_process_group(process)
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.to_thread(
+                        process.communicate, timeout=10
+                    )
+                except Exception:
+                    stdout_bytes, stderr_bytes = b"", b""
+                stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+                stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+                stderr = f"{stderr}\n[Killed: timeout after {job.timeout} seconds]".strip()
+                metrics = {}
 
             # Calculate duration
             finished_at = datetime.now()
@@ -185,10 +233,10 @@ class CronManager:
 
             # Update execution record
             execution.finished_at = finished_at
-            execution.exit_code = process.returncode
-            execution.stdout = stdout
-            execution.stderr = stderr
-            execution.success = process.returncode == 0
+            execution.exit_code = -1 if timed_out else process.returncode
+            execution.stdout = stdout[:MAX_OUTPUT_CHARS]
+            execution.stderr = stderr[:MAX_OUTPUT_CHARS]
+            execution.success = not timed_out and process.returncode == 0
             execution.duration_seconds = duration
             execution.cpu_percent = metrics.get("cpu_percent")
             execution.memory_mb = metrics.get("memory_mb")
@@ -201,36 +249,34 @@ class CronManager:
                 )
             else:
                 logger.warning(
-                    f"Cron job {job.name} failed with exit code {process.returncode}"
+                    f"Cron job {job.name} failed with exit code {execution.exit_code}"
                 )
                 # Trigger auto-fix if callback is set
                 if self._on_fix_needed and config.autofix_enabled:
                     await self._on_fix_needed(job, execution)
 
-            return execution.id
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"Cron job {job.name} timed out after {job.timeout}s")
-            execution.finished_at = datetime.now()
-            execution.exit_code = -1
-            execution.stderr = f"Timeout after {job.timeout} seconds"
-            execution.success = False
-            execution.duration_seconds = job.timeout
-            execution.save()
-            return execution.id
-
         except Exception as e:
-            logger.error(f"Error executing cron job {job.name}: {e}")
+            logger.error(f"Error monitoring cron job {job.name}: {e}")
             execution.finished_at = datetime.now()
             execution.exit_code = -1
             execution.stderr = str(e)
             execution.success = False
             execution.save()
-            return execution.id
 
         finally:
             with self._lock:
                 self._running_jobs.pop(job.id, None)
+
+    @staticmethod
+    def _kill_process_group(process: subprocess.Popen):
+        """Kill a process and its whole process group."""
+        try:
+            os.killpg(os.getpgid(process.pid), 9)
+        except (ProcessLookupError, PermissionError):
+            try:
+                process.kill()
+            except Exception:
+                pass
 
     async def _monitor_process(
         self, process: subprocess.Popen, timeout: int, job_name: str
@@ -308,11 +354,8 @@ class CronManager:
         if not process:
             return False
 
-        try:
-            os.killpg(os.getpgid(process.pid), 9)
-            return True
-        except (ProcessLookupError, PermissionError):
-            return False
+        self._kill_process_group(process)
+        return True
 
     def validate_schedule(self, schedule: str) -> tuple[bool, str]:
         """Validate a cron schedule expression."""

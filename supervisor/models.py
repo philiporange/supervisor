@@ -41,6 +41,20 @@ def initialize_db():
     )
     database.initialize(db)
     database.create_tables([Service, LogEntry, Metric, FixAttempt, CronJob, CronExecution], safe=True)
+    # Composite indexes for the hot queries (filter by FK, order by time).
+    # Created here because create_tables skips existing tables.
+    db.execute_sql(
+        "CREATE INDEX IF NOT EXISTS log_entries_service_timestamp "
+        "ON log_entries (service_id, timestamp)"
+    )
+    db.execute_sql(
+        "CREATE INDEX IF NOT EXISTS metrics_service_timestamp "
+        "ON metrics (service_id, timestamp)"
+    )
+    db.execute_sql(
+        "CREATE INDEX IF NOT EXISTS cron_executions_job_started "
+        "ON cron_executions (cron_job_id, started_at)"
+    )
 
 
 class BaseModel(Model):

@@ -38,6 +38,33 @@ function formatTime(iso) {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function formatUptime(seconds) {
+    if (seconds == null) return '-';
+    const s = Math.floor(seconds);
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+}
+
+// Toast notifications (non-blocking replacement for alert())
+function toast(message, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => {
+        el.classList.add('toast-out');
+        setTimeout(() => el.remove(), 300);
+    }, 3500);
+}
+
 // Modal helpers
 function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
@@ -79,14 +106,20 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
     document.getElementById(tab + '-tab').classList.remove('hidden');
 
-    // Stop supervisor logs interval when leaving logs tab
+    // Stop per-tab refresh intervals when leaving their tab
     if (tab !== 'logs' && typeof stopSupervisorLogsInterval === 'function') {
         stopSupervisorLogsInterval();
+    }
+    if (tab !== 'jobs' && typeof stopJobsInterval === 'function') {
+        stopJobsInterval();
     }
 
     // Load tab-specific content
     if (tab === 'cron' && typeof loadCronJobs === 'function') loadCronJobs();
-    if (tab === 'jobs' && typeof loadJobs === 'function') loadJobs();
+    if (tab === 'jobs' && typeof loadJobs === 'function') {
+        loadJobs();
+        if (typeof startJobsInterval === 'function') startJobsInterval();
+    }
     if (tab === 'logs' && typeof loadSupervisorLogs === 'function') {
         loadSupervisorLogs();
         if (typeof startSupervisorLogsInterval === 'function') startSupervisorLogsInterval();

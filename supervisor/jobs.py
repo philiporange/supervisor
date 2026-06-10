@@ -64,6 +64,9 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._max_completed = max_completed
+        # Strong references to running asyncio tasks; asyncio only keeps weak
+        # references, so unreferenced tasks can be garbage collected mid-run
+        self._tasks: set = set()
 
     def create_job(self, name: str) -> Job:
         """Create a new job."""
@@ -147,7 +150,9 @@ class JobManager:
                 job.completed_at = datetime.now()
                 logger.error(f"Job {job.id} failed: {name} - {e}")
 
-        asyncio.create_task(wrapper())
+        task = asyncio.create_task(wrapper())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         return job
 
     def update_progress(self, job_id: str, progress: str):

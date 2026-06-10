@@ -1,7 +1,23 @@
 /**
  * Background jobs management for the supervisor dashboard.
- * Handles job listing and detail views.
+ * Handles job listing and detail views. Auto-refreshes while the tab is open.
  */
+
+let jobsInterval = null;
+
+document.getElementById('jobs-filter').addEventListener('change', loadJobs);
+
+function startJobsInterval() {
+    stopJobsInterval();
+    jobsInterval = setInterval(loadJobs, 5000);
+}
+
+function stopJobsInterval() {
+    if (jobsInterval) {
+        clearInterval(jobsInterval);
+        jobsInterval = null;
+    }
+}
 
 async function loadJobs() {
     const filter = document.getElementById('jobs-filter').value;

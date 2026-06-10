@@ -176,7 +176,7 @@ async function sendChatMessage() {
 async function onboardProject() {
     const project = document.getElementById('chat-project').value.trim();
     if (!project) {
-        alert('Enter a project name or path first');
+        toast('Enter a project name or path first', 'error');
         return;
     }
 

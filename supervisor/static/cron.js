@@ -72,7 +72,7 @@ document.getElementById('cron-register-form').addEventListener('submit', async (
         hideModal('cron-register-modal');
         form.reset();
         await loadCronJobs();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 });
 
 function parseEnvVars(text) {
@@ -113,7 +113,7 @@ async function showCronEditModal(name) {
         document.getElementById('cron-edit-env_file').value = j.env_file || '';
         document.getElementById('cron-edit-env_vars').value = envVarsToText(j.env_vars);
         showModal('cron-edit-modal');
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 document.getElementById('cron-edit-form').addEventListener('submit', async (e) => {
@@ -133,7 +133,7 @@ document.getElementById('cron-edit-form').addEventListener('submit', async (e) =
         });
         hideModal('cron-edit-modal');
         await loadCronJobs();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 });
 
 async function deleteCronJob(name) {
@@ -141,19 +141,19 @@ async function deleteCronJob(name) {
     try {
         await api('DELETE', `/cron/${name}`);
         await loadCronJobs();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function runCronJobNow(name) {
     try {
         const res = await api('POST', `/cron/${name}/run`);
         if (res.status === 'already_running') {
-            alert(`${name} is already running`);
+            toast(`${name} is already running`);
         } else {
-            alert(`Started ${name}`);
+            toast(`Started ${name}`, 'success');
         }
         await loadCronJobs();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function showCronExecutions(name) {
@@ -172,10 +172,16 @@ async function refreshCronExecutions() {
             return;
         }
 
-        document.getElementById('cron-executions-content').innerHTML = execs.map(e => `
-            <div class="bg-[#111] border-l-2 ${e.success ? 'border-l-green-500' : 'border-l-red-500'} border border-gray-800 p-3">
+        document.getElementById('cron-executions-content').innerHTML = execs.map(e => {
+            const running = !e.finished_at;
+            const borderClass = running ? 'border-l-blue-500' : (e.success ? 'border-l-green-500' : 'border-l-red-500');
+            const statusHtml = running
+                ? '<span class="text-sm text-blue-400">Running</span>'
+                : `<span class="text-sm ${e.success ? 'text-green-400' : 'text-red-400'}">${e.success ? 'Success' : 'Failed'} (exit ${e.exit_code})</span>`;
+            return `
+            <div class="bg-[#111] border-l-2 ${borderClass} border border-gray-800 p-3">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-sm ${e.success ? 'text-green-400' : 'text-red-400'}">${e.success ? 'Success' : 'Failed'} (exit ${e.exit_code})</span>
+                    ${statusHtml}
                     <div class="flex items-center gap-3 text-xs text-gray-500 font-mono">
                         <span>${e.duration_seconds ? e.duration_seconds.toFixed(1) + 's' : '-'}</span>
                         <span>${formatTime(e.started_at)}</span>
@@ -188,7 +194,8 @@ async function refreshCronExecutions() {
                 ${e.stdout ? `<pre class="text-xs text-gray-400 whitespace-pre-wrap max-h-24 overflow-auto mb-2">${escapeHtml(e.stdout.slice(0, 1000))}</pre>` : ''}
                 ${e.stderr ? `<pre class="text-xs text-red-400 whitespace-pre-wrap max-h-24 overflow-auto">${escapeHtml(e.stderr.slice(0, 1000))}</pre>` : ''}
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (e) {
         document.getElementById('cron-executions-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
     }

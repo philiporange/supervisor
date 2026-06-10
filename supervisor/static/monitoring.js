@@ -77,7 +77,9 @@ async function refreshServiceLogs() {
         const content = document.getElementById('logs-content');
         const wasAtBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 50;
 
-        content.innerHTML = logs.map(l =>
+        // API returns newest first; display oldest -> newest so the bottom
+        // (where auto-scroll lands) shows the latest lines
+        content.innerHTML = logs.slice().reverse().map(l =>
             `<span class="${l.level === 'error' ? 'text-red-400' : 'text-gray-400'}">[${formatTime(l.timestamp)}] ${escapeHtml(l.message)}</span>`
         ).join('\n') || 'No logs';
 
@@ -313,7 +315,7 @@ async function restoreBackup(fixId) {
     if (!confirm('Restore from backup?')) return;
     try {
         await api('POST', `/fixes/${fixId}/restore`);
-        alert('Restored successfully');
+        toast('Restored successfully', 'success');
         await refreshFixes();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }

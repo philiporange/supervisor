@@ -68,9 +68,12 @@ async def lifespan(app: FastAPI):
     _service_cache: dict[str, Service] = {}
 
     def log_callback(service_name: str, level: str, message: str):
-        if service_name not in _service_cache:
-            _service_cache[service_name] = Service.get_or_none(Service.name == service_name)
-        service = _service_cache[service_name]
+        service = _service_cache.get(service_name)
+        if service is None:
+            # Don't cache misses: the service may simply not exist yet
+            service = Service.get_or_none(Service.name == service_name)
+            if service:
+                _service_cache[service_name] = service
         if service:
             LogEntry.create(service=service, level=level, message=message[:2000])
         auto_fixer.on_log(service_name, level, message)
@@ -145,9 +148,14 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+# Service and cron job names end up in filesystem paths (log dirs, backups)
+# and URLs, so restrict them to safe characters.
+NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
+
 # Pydantic models for API
 class ServiceCreate(BaseModel):
-    name: str = Field(..., description="Unique service identifier")
+    name: str = Field(..., pattern=NAME_PATTERN, max_length=100, description="Unique service identifier")
     command: str = Field(..., description="Command to run the service")
     working_dir: Optional[str] = Field(None, description="Working directory")
     port: Optional[int] = Field(None, description="Port the service listens on")
@@ -188,7 +196,7 @@ class ServiceResponse(BaseModel):
 
 # Cron job models
 class CronJobCreate(BaseModel):
-    name: str = Field(..., description="Unique cron job identifier")
+    name: str = Field(..., pattern=NAME_PATTERN, max_length=100, description="Unique cron job identifier")
     command: str = Field(..., description="Command to run")
     schedule: str = Field(..., description="Cron expression (e.g., '*/15 * * * *')")
     working_dir: Optional[str] = Field(None, description="Working directory")
@@ -577,7 +585,16 @@ async def get_caddy_generated_config():
     return {
         "caddyfile": generate_caddyfile(),
         "services": [
-            {"name": s.name, "port": s.port, "path": s.caddy_path}
+            {
+                "name": s.name,
+                "port": s.port,
+                "path": s.caddy_path,
+                "subdomain": s.caddy_subdomain,
+                "url": (
+                    f"https://{s.caddy_subdomain}.{config.caddy_base_domain}:{config.caddy_port}"
+                    if s.caddy_subdomain else None
+                ),
+            }
             for s in Service.select().where(Service.expose_caddy == True)
         ],
     }
@@ -1050,8 +1067,10 @@ async def get_cron_executions(
     if not job:
         raise HTTPException(status_code=404, detail=f"Cron job '{name}' not found")
 
+    # Join CronJob so to_dict's cron_job.name access doesn't query per row
     executions = (
-        CronExecution.select()
+        CronExecution.select(CronExecution, CronJob)
+        .join(CronJob)
         .where(CronExecution.cron_job == job)
         .order_by(CronExecution.started_at.desc())
         .offset(offset)

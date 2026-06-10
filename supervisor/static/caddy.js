@@ -12,7 +12,9 @@ async function loadCaddy() {
             document.getElementById('caddy-services').innerHTML = conf.services.map(s => `
                 <div class="bg-[#111] border border-gray-800 px-3 py-2 font-mono text-sm flex gap-4">
                     <span class="text-gray-300">${escapeHtml(s.name)}</span>
-                    <span class="text-blue-400">${s.path}</span>
+                    ${s.url
+                        ? `<a href="${s.url}" target="_blank" class="text-blue-400 hover:underline">${escapeHtml(s.subdomain)}</a>`
+                        : `<span class="text-blue-400">${escapeHtml(s.path || '-')}</span>`}
                     <span class="text-gray-500">:${s.port}</span>
                 </div>
             `).join('');
@@ -27,7 +29,7 @@ async function loadCaddy() {
 async function reloadCaddy() {
     try {
         await api('POST', '/caddy/reload');
-        alert('Caddy reloaded');
+        toast('Caddy reloaded', 'success');
         await loadCaddy();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
