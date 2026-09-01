@@ -3,7 +3,8 @@ Caddy reverse proxy management.
 
 Generates Caddy configuration for supervisor-managed services and writes to
 an auxiliary config file that's imported by the main Caddyfile. Uses subdomain
-routing by default (e.g., myapp.domain.com -> localhost:port).
+routing by default (e.g., myapp.domain.com -> localhost:port); a subdomain that
+contains a dot is a full hostname on another domain and is used verbatim.
 
 The main Caddyfile should include:
     import /etc/caddy/supervisor.conf
@@ -20,6 +21,16 @@ from .config import config
 from .models import Service
 
 logger = logging.getLogger(__name__)
+
+
+def service_host(subdomain: str) -> str:
+    """Hostname for a service: bare labels go under the base domain, dotted names as-is."""
+
+    return subdomain if "." in subdomain else f"{subdomain}.{config.caddy_base_domain}"
+
+
+def service_url(subdomain: str) -> str:
+    return f"https://{service_host(subdomain)}:{config.caddy_port}"
 
 
 def generate_supervisor_caddyfile(services: list[Service] = None) -> str:
@@ -52,8 +63,7 @@ def generate_supervisor_caddyfile(services: list[Service] = None) -> str:
 
     # Generate subdomain blocks
     for service in subdomain_services:
-        subdomain = service.caddy_subdomain
-        domain = f"{subdomain}.{config.caddy_base_domain}:{config.caddy_port}"
+        domain = f"{service_host(service.caddy_subdomain)}:{config.caddy_port}"
         lines.extend([
             f"{domain} {{",
             f"\treverse_proxy http://localhost:{service.port}",
@@ -245,8 +255,7 @@ def generate_caddy_config(services: list[Service] = None) -> dict:
                 "subdomain": s.caddy_subdomain,
                 "path": s.caddy_path,
                 "port": s.port,
-                "url": f"https://{s.caddy_subdomain}.{config.caddy_base_domain}:{config.caddy_port}"
-                if s.caddy_subdomain else None,
+                "url": service_url(s.caddy_subdomain) if s.caddy_subdomain else None,
             }
             for s in services
             if s.expose_caddy and s.port
