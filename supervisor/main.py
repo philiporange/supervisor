@@ -779,14 +779,15 @@ async def run_service_security_scan(name: str, model: str = "sonnet"):
             detail=f"Service '{name}' is not exposed via Caddy subdomain"
         )
 
-    exposed_url = service_url(service.caddy_subdomain)
+    # Build the service URL
+    service_url = f"https://{service.caddy_subdomain}.{config.caddy_base_domain}:{config.caddy_port}"
 
     # Run scan in background
     job = await job_manager.run_async_in_background(
         f"security-scan:{name}",
         run_security_scan,
         service.name,
-        exposed_url,
+        service_url,
         service.port or 443,
         model,
     )
@@ -795,7 +796,7 @@ async def run_service_security_scan(name: str, model: str = "sonnet"):
         "job_id": job.id,
         "status": "started",
         "service": name,
-        "url": exposed_url,
+        "url": service_url,
     }
 
 
