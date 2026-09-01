@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from .caddy import generate_caddyfile, get_caddy_config, reload_caddy, service_url
+from .caddy import generate_caddyfile, get_caddy_config, reload_caddy
 from .config import config
 from .cron import cron_manager
 from .fixer import auto_fixer
@@ -161,7 +161,7 @@ class ServiceCreate(BaseModel):
     port: Optional[int] = Field(None, description="Port the service listens on")
     enabled: bool = Field(True, description="Whether to auto-start")
     expose_caddy: bool = Field(False, description="Expose via Caddy reverse proxy")
-    caddy_subdomain: Optional[str] = Field(None, description="Subdomain for Caddy routing ('myapp' -> myapp.domain.com); a dotted name is used as the full host")
+    caddy_subdomain: Optional[str] = Field(None, description="Subdomain for Caddy routing (e.g., 'myapp' -> myapp.domain.com)")
     caddy_path: Optional[str] = Field(None, description="URL path for Caddy routing (legacy)")
     watch_dirs: Optional[list[str]] = Field(None, description="Directories to track disk usage")
 
@@ -590,7 +590,10 @@ async def get_caddy_generated_config():
                 "port": s.port,
                 "path": s.caddy_path,
                 "subdomain": s.caddy_subdomain,
-                "url": service_url(s.caddy_subdomain) if s.caddy_subdomain else None,
+                "url": (
+                    f"https://{s.caddy_subdomain}.{config.caddy_base_domain}:{config.caddy_port}"
+                    if s.caddy_subdomain else None
+                ),
             }
             for s in Service.select().where(Service.expose_caddy == True)
         ],
