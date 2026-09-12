@@ -2,8 +2,9 @@
 Supervisor FastAPI application.
 
 Provides REST API for managing services and cron jobs, viewing logs and metrics,
-triggering auto-fixes, and managing Caddy configuration. Cron jobs are triggered
-via a /api/cron/tick endpoint called by system cron every minute.
+triggering auto-fixes, and managing Caddy configuration. Dashboard status includes
+service exposure settings so context-menu actions reflect the current configuration.
+Cron jobs are triggered via a /api/cron/tick endpoint called by system cron every minute.
 """
 
 import asyncio
@@ -480,6 +481,8 @@ async def get_status():
                 "running": running,
                 "pid": process_manager.get_pid(service.name),
                 "port": service.port,
+                "expose_caddy": service.expose_caddy,
+                "caddy_subdomain": service.caddy_subdomain,
                 "metrics": metrics,
             }
         )

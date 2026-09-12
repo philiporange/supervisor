@@ -8,7 +8,19 @@ body { background: #080808; }
 .status-running { box-shadow: 0 0 0 2px #22c55e; }
 .status-stopped { box-shadow: 0 0 0 2px #ef4444; }
 .status-warning { box-shadow: 0 0 0 2px #f59e0b; }
-.context-menu { position: fixed; z-index: 1000; }
+.context-menu {
+    position: fixed;
+    z-index: 1000;
+    width: 12rem;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.context-menu button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
 .pulse-dot { animation: pulse 2s infinite; }
 @keyframes pulse {
     0%, 100% { opacity: 1; }

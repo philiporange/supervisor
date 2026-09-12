@@ -224,9 +224,9 @@
     </main>
 
     <!-- Context Menu -->
-    <div id="context-menu" class="context-menu hidden bg-[#111] border border-gray-700 shadow-xl min-w-[160px]">
+    <div id="context-menu" class="context-menu hidden bg-[#111] border border-gray-700 shadow-xl">
         <div class="py-1">
-            <button onclick="ctxAction('open')" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">Open in new tab</button>
+            <button onclick="ctxAction('open')" id="ctx-open" class="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800">Open in new tab</button>
             <div class="border-t border-gray-800 my-1"></div>
             <button onclick="ctxAction('start')" id="ctx-start" class="w-full px-3 py-1.5 text-left text-sm text-green-400 hover:bg-gray-800">Start</button>
             <button onclick="ctxAction('stop')" id="ctx-stop" class="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-gray-800">Stop</button>

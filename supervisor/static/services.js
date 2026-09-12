@@ -3,6 +3,9 @@
  * Handles service listing, rendering, context menu, actions, and register/edit forms.
  */
 
+let serviceRenderPending = false;
+let contextMenuPosition = null;
+
 // Live status updates
 async function updateStatus() {
     try {
@@ -11,8 +14,12 @@ async function updateStatus() {
         serviceHost = status.service_host || 'localhost';
         document.getElementById('running-count').textContent = status.running;
         document.getElementById('total-count').textContent = status.total;
-        // Don't re-render under an open context menu (re-render would orphan it)
-        if (document.getElementById('context-menu').classList.contains('hidden')) {
+        if (ctxService) {
+            serviceRenderPending = true;
+            ctxService = services.find(s => s.name === ctxService.name);
+            if (ctxService) updateContextMenu();
+            else hideContextMenu();
+        } else {
             renderHome();
             renderServicesList();
         }
@@ -40,8 +47,7 @@ function renderHome() {
         return `
             <a href="${url}" target="_blank"
                class="block p-4 bg-[#0a0a0a] border border-gray-800 hover:border-gray-600 transition-all ${statusClass}"
-               data-service="${s.name}"
-               oncontextmenu="showContextMenu(event, '${s.name}', ${s.running}, ${s.port || 'null'}); return false;">
+               data-service="${s.name}">
                 <div class="flex items-center gap-2 mb-2">
                     <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500 pulse-dot' : 'bg-red-500'}"></span>
                     <span class="font-medium text-sm truncate">${escapeHtml(s.name)}</span>
@@ -72,10 +78,9 @@ function renderServicesList() {
 
     list.innerHTML = services.map(s => {
         const statusClass = s.running ? 'border-l-green-500' : 'border-l-red-500';
-        const caddySubdomain = s.caddy_subdomain ? `'${s.caddy_subdomain}'` : 'null';
         return `
             <div class="bg-[#0a0a0a] border border-gray-800 border-l-2 ${statusClass} p-3 flex items-center justify-between"
-                 oncontextmenu="showContextMenu(event, '${s.name}', ${s.running}, ${s.port || 'null'}, ${caddySubdomain}); return false;">
+                 data-service="${s.name}">
                 <div class="flex items-center gap-4">
                     <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500' : 'bg-red-500'}"></span>
                     <div>
@@ -107,36 +112,77 @@ function renderServicesList() {
 }
 
 // Context menu
-function showContextMenu(e, name, running, port, caddySubdomain) {
+function showContextMenu(e, name) {
+    const service = services.find(s => s.name === name);
+    if (!service) {
+        hideContextMenu();
+        return;
+    }
+
     e.preventDefault();
-    ctxService = { name, running, port, caddySubdomain };
+    ctxService = service;
+    contextMenuPosition = { x: e.clientX, y: e.clientY };
 
     const menu = document.getElementById('context-menu');
-    document.getElementById('ctx-start').classList.toggle('hidden', running);
-    document.getElementById('ctx-stop').classList.toggle('hidden', !running);
-    document.getElementById('ctx-security').classList.toggle('hidden', !caddySubdomain);
-
-    menu.style.left = e.pageX + 'px';
-    menu.style.top = e.pageY + 'px';
     menu.classList.remove('hidden');
+    menu.scrollTop = 0;
+    updateContextMenu();
+}
+
+function updateContextMenu() {
+    const menu = document.getElementById('context-menu');
+    document.getElementById('ctx-open').disabled = !ctxService.port;
+    document.getElementById('ctx-start').classList.toggle('hidden', ctxService.running);
+    document.getElementById('ctx-stop').classList.toggle('hidden', !ctxService.running);
+    document.getElementById('ctx-security').classList.toggle('hidden',
+        !ctxService.expose_caddy || !ctxService.caddy_subdomain);
+
+    const margin = 8;
+    const { width, height } = menu.getBoundingClientRect();
+    menu.style.left = Math.max(margin, Math.min(contextMenuPosition.x,
+        document.documentElement.clientWidth - width - margin)) + 'px';
+    menu.style.top = Math.max(margin, Math.min(contextMenuPosition.y,
+        document.documentElement.clientHeight - height - margin)) + 'px';
 }
 
 function hideContextMenu() {
     document.getElementById('context-menu').classList.add('hidden');
+    ctxService = null;
+    contextMenuPosition = null;
+    if (serviceRenderPending) {
+        serviceRenderPending = false;
+        renderHome();
+        renderServicesList();
+    }
 }
 
-document.addEventListener('click', hideContextMenu);
-document.addEventListener('contextmenu', (e) => {
-    if (!e.target.closest('[data-service]') && !e.target.closest('.service-card')) {
-        hideContextMenu();
-    }
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#context-menu')) hideContextMenu();
 });
+document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('#context-menu')) {
+        e.preventDefault();
+        return;
+    }
+    const target = e.target.closest('[data-service]');
+    if (target) showContextMenu(e, target.dataset.service);
+    else hideContextMenu();
+});
+document.addEventListener('scroll', (e) => {
+    if (!document.getElementById('context-menu').contains(e.target)) hideContextMenu();
+}, true);
+document.getElementById('context-menu').addEventListener('wheel', (e) => {
+    const menu = e.currentTarget;
+    // Keep wheel gestures over a menu without overflow from scrolling the page.
+    if (menu.scrollHeight <= menu.clientHeight) e.preventDefault();
+}, { passive: false });
+window.addEventListener('resize', hideContextMenu);
+window.addEventListener('blur', hideContextMenu);
 
 async function ctxAction(action) {
-    hideContextMenu();
     if (!ctxService) return;
-
     const { name, port } = ctxService;
+    hideContextMenu();
 
     switch (action) {
         case 'open':

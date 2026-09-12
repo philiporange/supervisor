@@ -66,7 +66,10 @@ function toast(message, type = 'info') {
 }
 
 // Modal helpers
-function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function showModal(id) {
+    hideContextMenu();
+    document.getElementById(id).classList.remove('hidden');
+}
 function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
 
 // Hamburger menu toggle
@@ -77,6 +80,7 @@ document.getElementById('menu-toggle').addEventListener('click', () => {
 
 // Tab navigation
 function switchTab(tab) {
+    hideContextMenu();
     // Update desktop tabs
     document.querySelectorAll('.tab').forEach(t => {
         t.classList.remove('bg-white', 'text-black');
