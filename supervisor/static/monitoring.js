@@ -299,8 +299,7 @@ async function refreshFixes() {
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-sm ${f.success ? 'text-green-400' : 'text-red-400'}">${f.success ? 'Success' : 'Failed'}</span>
                     <span class="text-xs text-gray-500 font-mono">${formatTime(f.timestamp)}</span>
-                    ${f.can_restore ? `<button onclick="restoreBackup(${f.id})" class="px-2 py-1 text-xs bg-yellow-600 text-white hover:bg-yellow-500">Restore</button>` : ''}
-                    ${f.restored ? '<span class="text-xs text-gray-500">Restored</span>' : ''}
+                    ${f.verdict ? `<span class="text-xs text-gray-500">${escapeHtml(f.verdict)}</span>` : ''}
                 </div>
                 <pre class="text-xs text-gray-400 whitespace-pre-wrap mb-2 max-h-24 overflow-auto">${escapeHtml(f.error_summary)}</pre>
                 ${f.robot_response ? `<pre class="text-xs text-gray-500 whitespace-pre-wrap max-h-32 overflow-auto">${escapeHtml(f.robot_response)}</pre>` : ''}
@@ -310,12 +309,4 @@ async function refreshFixes() {
         document.getElementById('fixes-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
     }
 }
-
-async function restoreBackup(fixId) {
-    if (!confirm('Restore from backup?')) return;
-    try {
-        await api('POST', `/fixes/${fixId}/restore`);
-        toast('Restored successfully', 'success');
-        await refreshFixes();
-    } catch (e) { toast('Error: ' + e.message, 'error'); }
 }

@@ -187,8 +187,6 @@ class FixAttempt(BaseModel):
     robot_response = TextField(null=True)
     success = BooleanField(default=False)
     files_modified = TextField(null=True)  # JSON list
-    backup_path = CharField(null=True)  # Path to backup directory
-    restored = BooleanField(default=False)  # Whether backup was restored
     timestamp = DateTimeField(default=datetime.now, index=True)
     model = CharField(null=True)
     verdict = CharField(null=True)  # fixed, not_a_code_bug, unable, error
@@ -204,9 +202,6 @@ class FixAttempt(BaseModel):
             "robot_response": self.robot_response,
             "success": self.success,
             "files_modified": self.files_modified,
-            "backup_path": self.backup_path,
-            "restored": self.restored,
-            "can_restore": bool(self.backup_path and not self.restored),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "model": self.model,
             "verdict": self.verdict,

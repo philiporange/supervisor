@@ -149,7 +149,7 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
-# Service and cron job names end up in filesystem paths (log dirs, backups)
+# Service and cron job names end up in filesystem paths (log dirs)
 # and URLs, so restrict them to safe characters.
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 
@@ -557,57 +557,6 @@ async def list_incidents(
         query = query.where(Incident.decision == decision)
     incidents = query.order_by(Incident.timestamp.desc()).limit(limit)
     return [i.to_dict() for i in incidents]
-
-
-@app.post("/api/fixes/{fix_id}/restore")
-async def restore_fix_backup(fix_id: int):
-    """Restore code from a fix attempt's backup."""
-    from .fixer import restore_backup
-
-    fix = FixAttempt.get_or_none(FixAttempt.id == fix_id)
-    if not fix:
-        raise HTTPException(status_code=404, detail=f"Fix attempt {fix_id} not found")
-
-    if not fix.backup_path:
-        raise HTTPException(status_code=400, detail="No backup available for this fix")
-
-    if fix.restored:
-        raise HTTPException(status_code=400, detail="Backup already restored")
-
-    # Get working directory
-    service = fix.service
-    working_dir = service.working_dir
-    if not working_dir:
-        import shlex
-        parts = shlex.split(service.command)
-        for part in parts:
-            if part.endswith(".py") and "/" in part:
-                working_dir = str(Path(part).parent)
-                break
-
-    if not working_dir:
-        raise HTTPException(status_code=400, detail="Cannot determine working directory")
-
-    # Restore backup
-    success = restore_backup(fix.backup_path, working_dir)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to restore backup")
-
-    # Mark as restored
-    fix.restored = True
-    fix.save()
-
-    # Restart service
-    success, message = process_manager.restart(service)
-    if not success:
-        logger.warning(f"Backup restored but service failed to restart: {message}")
-
-    return {
-        "status": "restored",
-        "fix_id": fix_id,
-        "backup_path": fix.backup_path,
-        "service": service.name,
-    }
 
 
 # Caddy

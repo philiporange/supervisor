@@ -8,9 +8,11 @@ it holds strong hits and the Jev interval has elapsed, the window is sent to
 Jev (tier 3) for a typed verdict on what kind of failure it shows. Only a
 verdict of a repo-fixable code or dependency fault, outside the per-service
 cooldown and under the daily cap, reaches tier 4: a coding agent run in the
-service's working directory. Every Jev review is recorded as an Incident so
-decisions can be audited; every agent run is a FixAttempt with a backup
-that can be restored from the dashboard.
+service's working directory. Tier 4 is off unless AUTOFIX_ENABLED is set;
+the dashboard's manual Trigger Fix still works. Every Jev review is recorded
+as an Incident so decisions can be audited; every agent run is a FixAttempt
+listing the files it changed. Nothing is copied aside first: the host keeps
+its own daily copies of every project.
 
 Fix runs happen in background tasks, one service at a time, so a slow agent
 never blocks reviews of other services. Cooldowns are derived from stored
@@ -22,7 +24,6 @@ import asyncio
 import json
 import logging
 import shlex
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -42,84 +43,6 @@ from .sluice import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def create_backup(working_dir: str, service_name: str) -> str:
-    """Copy the working directory before the agent touches it. Returns the backup path."""
-    backup_base = config.data_dir / "backups" / service_name
-    backup_base.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = backup_base / timestamp
-
-    shutil.copytree(
-        working_dir,
-        backup_path,
-        ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc", ".git", "node_modules",
-            ".venv", "venv", "*.egg-info", ".mypy_cache"
-        ),
-    )
-
-    logger.info(f"Created backup at {backup_path}")
-    return str(backup_path)
-
-
-def restore_backup(backup_path: str, working_dir: str) -> bool:
-    """Restore a backup to the working directory. Returns True if successful."""
-    try:
-        backup = Path(backup_path)
-        target = Path(working_dir)
-
-        if not backup.exists():
-            logger.error(f"Backup not found: {backup_path}")
-            return False
-
-        for item in backup.iterdir():
-            target_item = target / item.name
-            if target_item.exists():
-                if target_item.is_dir():
-                    shutil.rmtree(target_item)
-                else:
-                    target_item.unlink()
-
-        for item in backup.iterdir():
-            target_item = target / item.name
-            if item.is_dir():
-                shutil.copytree(item, target_item)
-            else:
-                shutil.copy2(item, target_item)
-
-        logger.info(f"Restored backup from {backup_path} to {working_dir}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to restore backup: {e}")
-        return False
-
-
-def remove_backup(backup_path: str):
-    """Delete a backup that turned out to be unnecessary (the agent changed nothing)."""
-    try:
-        shutil.rmtree(backup_path)
-    except Exception as e:
-        logger.warning(f"Failed to remove backup {backup_path}: {e}")
-
-
-def cleanup_old_backups(service_name: str, keep: int | None = None):
-    """Remove old backups, keeping only the most recent ones."""
-    keep = keep if keep is not None else config.backup_keep
-    backup_base = config.data_dir / "backups" / service_name
-    if not backup_base.exists():
-        return
-
-    backups = sorted(backup_base.iterdir(), key=lambda p: p.name, reverse=True)
-    for old_backup in backups[keep:]:
-        try:
-            shutil.rmtree(old_backup)
-            logger.debug(f"Removed old backup: {old_backup}")
-        except Exception as e:
-            logger.warning(f"Failed to remove old backup {old_backup}: {e}")
 
 
 def working_dir_for(command: str, working_dir: str | None) -> str | None:
@@ -304,13 +227,6 @@ class AutoFixer:
                 model=config.fix_model,
             )
 
-        backup_path = None
-        try:
-            backup_path = await asyncio.to_thread(create_backup, working_dir, service.name)
-            await asyncio.to_thread(cleanup_old_backups, service.name)
-        except Exception as e:
-            logger.warning(f"Failed to create backup for {service.name}: {e}")
-
         prompt = build_prompt(
             name=service.name,
             command=service.command,
@@ -323,17 +239,12 @@ class AutoFixer:
         logger.info(f"Attempting fix for {service.name}")
         result = await asyncio.to_thread(run_fix, working_dir, prompt)
 
-        if backup_path and not result.files_modified:
-            await asyncio.to_thread(remove_backup, backup_path)
-            backup_path = None
-
         attempt = FixAttempt.create(
             service=service,
             error_summary=error_text[:500],
             robot_response=(result.error or result.output)[-5000:] if (result.error or result.output) else None,
             success=result.success,
             files_modified=json.dumps(result.files_modified) if result.files_modified else None,
-            backup_path=backup_path,
             model=config.fix_model,
             verdict=result.verdict,
         )
@@ -398,13 +309,6 @@ class AutoFixer:
             logger.warning(f"No working directory for cron job {cron_job.name}, cannot fix")
             return
 
-        backup_path = None
-        try:
-            backup_path = await asyncio.to_thread(create_backup, working_dir, f"cron_{cron_job.name}")
-            await asyncio.to_thread(cleanup_old_backups, f"cron_{cron_job.name}")
-        except Exception as e:
-            logger.warning(f"Failed to create backup for cron job {cron_job.name}: {e}")
-
         prompt = build_prompt(
             name=f"cron job {cron_job.name} (schedule {cron_job.schedule})",
             command=cron_job.command,
@@ -415,9 +319,6 @@ class AutoFixer:
             fixable=verdict.fixable if verdict else 0.0,
         )
         result = await asyncio.to_thread(run_fix, working_dir, prompt)
-        if backup_path and not result.files_modified:
-            await asyncio.to_thread(remove_backup, backup_path)
-
         latest = (
             CronExecution.select()
             .where(CronExecution.cron_job == cron_job)

@@ -78,14 +78,13 @@ class Config:
     jev_fixable_threshold: float = float(os.environ.get("JEV_FIXABLE_THRESHOLD", "0.6"))
 
     # Error sluice: tier 4 (coding agent fix, rare last resort)
-    autofix_enabled: bool = os.environ.get("AUTOFIX_ENABLED", "true").lower() == "true"
+    autofix_enabled: bool = os.environ.get("AUTOFIX_ENABLED", "false").lower() == "true"
     autofix_timeout: int = int(os.environ.get("AUTOFIX_TIMEOUT", "900"))
     fix_model: str = os.environ.get("FIX_MODEL", "muse-spark-1.3-contributor")
     fix_reasoning_effort: str = os.environ.get("FIX_REASONING_EFFORT", "medium")
     fix_max_steps: int = int(os.environ.get("FIX_MAX_STEPS", "80"))
     fix_cooldown_minutes: int = int(os.environ.get("FIX_COOLDOWN_MINUTES", "360"))
     fix_daily_cap: int = int(os.environ.get("FIX_DAILY_CAP", "6"))
-    backup_keep: int = int(os.environ.get("BACKUP_KEEP", "3"))
 
     # Process management
     restart_delay: int = int(os.environ.get("RESTART_DELAY", "5"))

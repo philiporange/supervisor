@@ -84,7 +84,8 @@ Projects use `~/.{project_name}/` as the default data directory for databases, l
 | GET | /api/services/{name}/fixes | Get fix attempt history |
 | POST | /api/services/{name}/security-scan | Run security scan (background job) |
 | GET | /api/services/{name}/security-scan/latest | Get latest security scan results |
-| POST | /api/fixes/{id}/restore | Restore code from backup |
+| GET | /api/services/{name}/incidents | Error-sluice review history |
+| GET | /api/incidents | Recent reviews across all services |
 | GET | /api/status | Overview of all services |
 | GET | /api/cron | List all cron jobs |
 | POST | /api/cron | Register new cron job |
@@ -181,7 +182,7 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 - **Cron Scheduling** - Run scripts on cron schedules with execution history and resource tracking
 - **Log Capture** - Stores stdout/stderr in SQLite and size-rotated log files
 - **Resource Monitoring** - Tracks CPU/memory/disk usage per service and cron job
-- **Error Sluice** - Tiered error detection: stderr channel, regex, then a cheap Jev typed classifier, and only as a last resort a coding agent that fixes the repo (with backup/restore and audit trail)
+- **Error Sluice** - Tiered error detection: stderr channel, regex, then a cheap Jev typed classifier, and only as a last resort a coding agent that fixes the repo (off by default, with an audit trail)
 - **Security Scanning** - AI-powered security analysis for Caddy-exposed services
 - **AI Onboarding** - Analyze projects and register them automatically using Robot AI
 - **AI Chat** - Interactive chat assistant for project help and debugging
@@ -215,14 +216,13 @@ Environment variables (or `.env` file):
 | JEV_INTERVAL_MINUTES | 30 | Minimum gap between Jev reviews of one service |
 | JEV_THRESHOLD | 0.7 | code_bug + dependency probability needed to escalate |
 | JEV_FIXABLE_THRESHOLD | 0.6 | Repo-fixable probability needed to escalate |
-| AUTOFIX_ENABLED | true | Allow the coding-agent tier to run |
+| AUTOFIX_ENABLED | false | Allow the coding-agent tier to run automatically |
 | AUTOFIX_TIMEOUT | 900 | Coding-agent timeout (seconds) |
 | FIX_MODEL | muse-spark-1.3-contributor | Model passed to `muse exec` |
 | FIX_REASONING_EFFORT | medium | Reasoning effort for the fix agent |
 | FIX_MAX_STEPS | 80 | Cap on agent model steps per fix |
 | FIX_COOLDOWN_MINUTES | 360 | Minimum gap between fix attempts on one service |
 | FIX_DAILY_CAP | 6 | Maximum fix attempts per 24 hours across all services |
-| BACKUP_KEEP | 3 | Backups kept per service |
 | MAX_RESTART_ATTEMPTS | 3 | Max rapid restarts before giving up (resets after stable uptime) |
 | RESTART_DELAY | 5 | Delay before restarting crashed services (seconds) |
 
@@ -232,7 +232,6 @@ All data stored in `~/.supervisor/`:
 - `supervisor.db` - SQLite database
 - `supervisor.log` - Supervisor logs (with rotation, max 10MB x 5 files)
 - `logs/{service}/` - Per-service log files
-- `backups/{service}/` - Code backups before auto-fix (keeps last 10)
 
 ## Project Structure
 

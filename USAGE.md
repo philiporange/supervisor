@@ -604,37 +604,11 @@ curl http://localhost:9900/api/services/myapp/fixes
     "timestamp": "2026-05-16T10:30:00",
     "error_log": "Database connection timeout after 30s",
     "robot_output": "Updated connection pool max_connections from 10 to 50",
-    "backup_path": "~/.supervisor/backups/myapp/20260516_103000",
     "success": true,
-    "restored": false
+    "verdict": "fixed"
   }
 ]
 ```
-
-### Restoring from Backup
-
-If an auto-fix breaks your code, restore from backup:
-
-```bash
-curl -X POST http://localhost:9900/api/fixes/1/restore
-```
-
-**Example response:**
-
-```json
-{
-  "status": "restored",
-  "fix_id": 1,
-  "backup_path": "~/.supervisor/backups/myapp/20260516_103000",
-  "service": "myapp"
-}
-```
-
-The service will be automatically restarted after restore.
-
-## AI Onboarding
-
-Use AI to automatically analyze and register projects.
 
 ### Onboard a Project
 
@@ -943,9 +917,6 @@ All data is stored in `~/.supervisor/`:
 ├── logs/
 │   ├── myapp/            # Per-service log files
 │   └── worker/
-└── backups/
-    ├── myapp/            # Code backups before auto-fix
-    └── worker/           # (keeps last 10)
 ```
 
 ## Common Patterns
@@ -1049,8 +1020,6 @@ supervisor
 # Check fix history
 curl http://localhost:9900/api/services/myapp/fixes
 
-# If fix breaks something, restore from backup
-curl -X POST http://localhost:9900/api/fixes/1/restore
 ```
 
 ### Pattern 5: AI-Powered Onboarding
@@ -1137,11 +1106,10 @@ curl http://localhost:9900/api/services/myapp
 | `GET` | `/api/onboard/preview` | Preview onboard without running |
 | `POST` | `/api/chat` | Stream chat with AI (SSE) |
 
-### Fix & Restore Endpoints
+### Fix Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/fixes/{id}/restore` | Restore code from backup |
 
 ### System Endpoints
 
@@ -1311,9 +1279,8 @@ curl http://localhost:9900/api/services/myapp/fixes
     "timestamp": "2026-05-16T10:30:00",
     "error_log": "ModuleNotFoundError: No module named 'requests'",
     "robot_output": "Added 'requests' to requirements.txt and installed dependencies",
-    "backup_path": "~/.supervisor/backups/myapp/20260516_103000",
     "success": true,
-    "restored": false
+    "verdict": "fixed"
   }
 ]
 
@@ -1322,16 +1289,6 @@ curl http://localhost:9900/api/services/myapp
 
 # Response shows running: true, pid: 12350
 
-# 5. If fix broke something, restore backup
-curl -X POST http://localhost:9900/api/fixes/1/restore
-
-# Response:
-{
-  "status": "restored",
-  "fix_id": 1,
-  "backup_path": "~/.supervisor/backups/myapp/20260516_103000",
-  "service": "myapp"
-}
 ```
 
 ## Troubleshooting
