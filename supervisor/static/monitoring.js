@@ -6,10 +6,18 @@
 // Service Logs
 let logsInterval = null;
 let logsUserScrolled = false;
+let logsEntries = [];   // oldest first
+let logsLastId = null;
+
+function resetServiceLogs() {
+    logsEntries = [];
+    logsLastId = null;
+}
 
 async function showServiceLogs(name) {
     currentService = name;
     logsUserScrolled = false;
+    resetServiceLogs();
     document.getElementById('logs-title').textContent = name;
     document.getElementById('logs-live').checked = true;
     updateLogsLiveIndicator(true);
@@ -65,29 +73,41 @@ document.getElementById('logs-content').addEventListener('scroll', (e) => {
     logsUserScrolled = !atBottom;
 });
 
+document.getElementById('logs-level').addEventListener('change', () => { resetServiceLogs(); refreshServiceLogs(); });
+document.getElementById('logs-limit').addEventListener('change', () => { resetServiceLogs(); refreshServiceLogs(); });
+
+// The API returns newest first. The first call loads a full window; later
+// calls pass after_id and only fetch lines added since, which are appended.
 async function refreshServiceLogs() {
     if (!currentService) return;
     const level = document.getElementById('logs-level').value;
-    const limit = document.getElementById('logs-limit').value;
+    const limit = parseInt(document.getElementById('logs-limit').value, 10);
     let path = `/services/${currentService}/logs?limit=${limit}`;
     if (level) path += `&level=${level}`;
+    if (logsLastId !== null) path += `&after_id=${logsLastId}`;
 
     try {
         const logs = await api('GET', path);
         const content = document.getElementById('logs-content');
         const wasAtBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 50;
 
-        // API returns newest first; display oldest -> newest so the bottom
-        // (where auto-scroll lands) shows the latest lines
-        content.innerHTML = logs.slice().reverse().map(l =>
-            `<span class="${l.level === 'error' ? 'text-red-400' : 'text-gray-400'}">[${formatTime(l.timestamp)}] ${escapeHtml(l.message)}</span>`
-        ).join('\n') || 'No logs';
+        if (logs.length) {
+            logsEntries = logsEntries.concat(logs.slice().reverse()).slice(-limit);
+            logsLastId = logs[0].id;
+        } else if (logsLastId === null) {
+            logsLastId = 0;
+        }
+        if (logs.length || !content.innerHTML) {
+            content.innerHTML = logsEntries.map(l =>
+                `<span class="${l.level === 'error' ? 'text-red-400' : 'text-gray-400'}">[${formatTime(l.timestamp)}] ${escapeHtml(l.message)}</span>`
+            ).join('\n') || 'No logs';
+        }
 
         if (!logsUserScrolled || wasAtBottom) {
             content.scrollTop = content.scrollHeight;
         }
 
-        document.getElementById('logs-status').textContent = `${logs.length} lines`;
+        document.getElementById('logs-status').textContent = `${logsEntries.length} lines`;
     } catch (e) {
         document.getElementById('logs-content').textContent = 'Error: ' + e.message;
     }
@@ -96,15 +116,32 @@ async function refreshServiceLogs() {
 // Supervisor logs
 let supervisorLogsInterval = null;
 let supervisorLogsUserScrolled = false;
+let supervisorLines = [];   // newest first
+let supervisorOffset = null;
 
+document.getElementById('log-lines').addEventListener('change', () => { supervisorOffset = null; loadSupervisorLogs(); });
+
+// The server returns only bytes appended since the offset it last handed
+// back; a reset response (first load or log rotation) replaces the view.
 async function loadSupervisorLogs() {
-    const lines = document.getElementById('log-lines').value;
+    const lines = parseInt(document.getElementById('log-lines').value, 10);
     const content = document.getElementById('supervisor-logs');
     const wasAtTop = content.scrollTop < 50;
 
     try {
-        const res = await api('GET', `/supervisor/logs?lines=${lines}`);
-        content.textContent = res.lines.reverse().join('');
+        let path = `/supervisor/logs?lines=${lines}`;
+        if (supervisorOffset !== null) path += `&offset=${supervisorOffset}`;
+        const res = await api('GET', path);
+        supervisorOffset = res.offset;
+        const fresh = res.lines.slice().reverse();
+        if (res.reset) {
+            supervisorLines = fresh;
+        } else if (fresh.length) {
+            supervisorLines = fresh.concat(supervisorLines).slice(0, lines);
+        } else {
+            return;
+        }
+        content.textContent = supervisorLines.join('');
 
         if (!supervisorLogsUserScrolled || wasAtTop) {
             content.scrollTop = 0;

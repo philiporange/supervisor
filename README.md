@@ -194,6 +194,8 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 
 ## Configuration
 
+The dashboard's Tailwind CSS is precompiled into `supervisor/static/tailwind.css`. After changing classes in the templates or scripts, rebuild it with `scripts/build_css.sh` (needs npx) and commit the result.
+
 Environment variables (or `.env` file):
 
 | Variable | Default | Description |

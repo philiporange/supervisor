@@ -22,6 +22,7 @@ async def test_status_includes_service_exposure(monkeypatch):
     monkeypatch.setattr(main.process_manager, "is_running", lambda name: False)
     monkeypatch.setattr(main.process_manager, "get_pid", lambda name: None)
     monkeypatch.setattr(main.config, "get_service_host", lambda: "localhost")
+    monkeypatch.setattr(main, "_last_incidents", lambda hours: {})
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
@@ -34,3 +35,4 @@ async def test_status_includes_service_exposure(monkeypatch):
     assert public["caddy_subdomain"] == "public"
     assert private["expose_caddy"] is False
     assert private["caddy_subdomain"] is None
+    assert public["last_incident"] is None

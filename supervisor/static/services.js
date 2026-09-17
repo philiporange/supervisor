@@ -28,6 +28,14 @@ async function updateStatus() {
     }
 }
 
+function incidentBadge(s, extraClass = '') {
+    const i = s.last_incident;
+    if (!i) return '';
+    const color = i.decision === 'diagnosed' || i.decision === 'fix_attempted' ? 'text-blue-400' : 'text-yellow-500';
+    const label = i.kind || i.decision;
+    return `<div class="text-xs font-mono ${color} ${extraClass}" title="${escapeHtml(i.decision)}">${escapeHtml(label)} · ${formatAgo(i.timestamp)}</div>`;
+}
+
 // Render home grid
 function renderHome() {
     const grid = document.getElementById('home-grid');
@@ -63,6 +71,7 @@ function renderHome() {
                     up ${formatUptime(s.metrics.uptime_seconds)}${s.metrics.restart_count ? ` | ${s.metrics.restart_count} restarts` : ''}
                 </div>
                 ` : (s.running ? '' : '<div class="mt-2 text-xs text-gray-600 font-mono">stopped</div>')}
+                ${incidentBadge(s, 'mt-1')}
             </a>
         `;
     }).join('');
@@ -86,6 +95,7 @@ function renderServicesList() {
                     <div>
                         <div class="font-medium text-sm">${escapeHtml(s.name)}</div>
                         <div class="text-xs text-gray-500 font-mono">${s.port ? ':' + s.port : '-'} | PID: ${s.pid || '-'}</div>
+                        ${incidentBadge(s)}
                     </div>
                 </div>
                 <div class="flex items-center gap-4">

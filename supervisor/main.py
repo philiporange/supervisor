@@ -9,7 +9,6 @@ Cron jobs are triggered via a /api/cron/tick endpoint called by system cron ever
 
 import asyncio
 import logging
-from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -27,6 +26,7 @@ from .caddy import generate_caddyfile, get_caddy_config, reload_caddy
 from .config import config
 from .cron import cron_manager
 from .fixer import auto_fixer
+from .logtail import read_since
 from .robot_integration import run_robot_onboard, run_security_scan, stream_robot_chat, resolve_project_path
 from .jobs import JobStatus, job_manager
 from .models import CronExecution, CronJob, FixAttempt, Incident, LogEntry, Metric, Service, initialize_db
@@ -419,8 +419,9 @@ async def get_service_logs(
     level: Optional[str] = Query(None, description="Filter by level: info, warning, error"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    after_id: Optional[int] = Query(None, description="Only entries newer than this id"),
 ):
-    """Get recent logs for a service."""
+    """Get recent logs for a service, newest first. Pass after_id to poll incrementally."""
     service = Service.get_or_none(Service.name == name)
     if not service:
         raise HTTPException(status_code=404, detail=f"Service '{name}' not found")
@@ -428,6 +429,8 @@ async def get_service_logs(
     query = LogEntry.select().where(LogEntry.service == service)
     if level:
         query = query.where(LogEntry.level == level)
+    if after_id is not None:
+        query = query.where(LogEntry.id > after_id)
 
     logs = query.order_by(LogEntry.timestamp.desc()).offset(offset).limit(limit)
     return [log.to_dict() for log in logs]
@@ -466,11 +469,32 @@ async def get_service_current_metrics(name: str):
     return metrics
 
 
+def _last_incidents(hours: int) -> dict[int, dict]:
+    """Newest non-noise incident per service id within the window, for the dashboard badge."""
+    cutoff = datetime.now() - timedelta(hours=hours)
+    rows = (
+        Incident.select(Incident.service, Incident.timestamp, Incident.jev_kind, Incident.decision)
+        .where(Incident.timestamp > cutoff, Incident.service.is_null(False))
+        .order_by(Incident.timestamp.desc())
+    )
+    latest = {}
+    for row in rows:
+        if row.service_id in latest or row.jev_kind == "noise":
+            continue
+        latest[row.service_id] = {
+            "timestamp": row.timestamp.isoformat(),
+            "kind": row.jev_kind,
+            "decision": row.decision,
+        }
+    return latest
+
+
 # Status overview
 @app.get("/api/status")
 async def get_status():
     """Get overview of all services. Reads from metrics cache for speed."""
     services = []
+    last_incidents = _last_incidents(hours=24)
     for service in Service.select():
         running = process_manager.is_running(service.name)
         metrics = resource_monitor.get_cached_metrics(service.name) if running else None
@@ -484,6 +508,7 @@ async def get_status():
                 "expose_caddy": service.expose_caddy,
                 "caddy_subdomain": service.caddy_subdomain,
                 "metrics": metrics,
+                "last_incident": last_incidents.get(service.id),
             }
         )
     return {
@@ -640,14 +665,12 @@ async def get_job(job_id: str):
 
 # Supervisor logs
 @app.get("/api/supervisor/logs")
-async def get_supervisor_logs(lines: int = Query(100, ge=1, le=1000)):
-    """Get recent supervisor log entries."""
-    try:
-        with open(config.supervisor_log, "r") as f:
-            recent = deque(f, maxlen=lines)
-            return {"lines": list(recent), "total": lines}
-    except FileNotFoundError:
-        return {"lines": [], "total": 0}
+async def get_supervisor_logs(
+    lines: int = Query(100, ge=1, le=1000),
+    offset: Optional[int] = Query(None, ge=0, description="Byte offset from the previous response"),
+):
+    """Tail the supervisor log. Send back offset to receive only new lines."""
+    return read_since(config.supervisor_log, offset, lines)
 
 
 # Helper functions
