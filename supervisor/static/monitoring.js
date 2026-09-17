@@ -309,4 +309,3 @@ async function refreshFixes() {
         document.getElementById('fixes-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
     }
 }
-}
