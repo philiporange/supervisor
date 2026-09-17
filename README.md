@@ -181,7 +181,7 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 - **Cron Scheduling** - Run scripts on cron schedules with execution history and resource tracking
 - **Log Capture** - Stores stdout/stderr in SQLite and size-rotated log files
 - **Resource Monitoring** - Tracks CPU/memory/disk usage per service and cron job
-- **Auto-Fix** - Uses Robot to detect and fix errors in services and cron jobs (with backup/restore)
+- **Error Sluice** - Tiered error detection: stderr channel, regex, then a cheap Jev typed classifier, and only as a last resort a coding agent that fixes the repo (with backup/restore and audit trail)
 - **Security Scanning** - AI-powered security analysis for Caddy-exposed services
 - **AI Onboarding** - Analyze projects and register them automatically using Robot AI
 - **AI Chat** - Interactive chat assistant for project help and debugging
@@ -207,8 +207,22 @@ Environment variables (or `.env` file):
 | LOG_MAX_BYTES | 10485760 | Max log file size before rotation, supervisor and per-service logs (10MB) |
 | LOG_BACKUP_COUNT | 5 | Number of rotated log files to keep |
 | LOG_RETENTION_DAYS | 3 | Days to keep logs in database |
-| AUTOFIX_ENABLED | true | Enable Robot auto-fix |
-| AUTOFIX_TIMEOUT | 300 | Auto-fix timeout (seconds) |
+| SLUICE_WINDOW_LINES | 80 | Candidate error lines kept per service |
+| SLUICE_SAMPLE_CHARS | 6000 | Max characters of output sent for review |
+| TYPESAFE_API_KEY | | TypeSafe key for the Jev classification tier |
+| TYPESAFE_URL | https://api.typesafe.ai/v1/systemone | TypeSafe endpoint |
+| TYPESAFE_MODEL | jev-latest | Jev model |
+| JEV_INTERVAL_MINUTES | 30 | Minimum gap between Jev reviews of one service |
+| JEV_THRESHOLD | 0.7 | code_bug + dependency probability needed to escalate |
+| JEV_FIXABLE_THRESHOLD | 0.6 | Repo-fixable probability needed to escalate |
+| AUTOFIX_ENABLED | true | Allow the coding-agent tier to run |
+| AUTOFIX_TIMEOUT | 900 | Coding-agent timeout (seconds) |
+| FIX_MODEL | muse-spark-1.3-contributor | Model passed to `muse exec` |
+| FIX_REASONING_EFFORT | medium | Reasoning effort for the fix agent |
+| FIX_MAX_STEPS | 80 | Cap on agent model steps per fix |
+| FIX_COOLDOWN_MINUTES | 360 | Minimum gap between fix attempts on one service |
+| FIX_DAILY_CAP | 6 | Maximum fix attempts per 24 hours across all services |
+| BACKUP_KEEP | 3 | Backups kept per service |
 | MAX_RESTART_ATTEMPTS | 3 | Max rapid restarts before giving up (resets after stable uptime) |
 | RESTART_DELAY | 5 | Delay before restarting crashed services (seconds) |
 

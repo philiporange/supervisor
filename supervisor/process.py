@@ -8,6 +8,8 @@ period of stable uptime so a service that crashes occasionally over weeks
 isn't permanently given up on.
 Start and restart return (success, message) tuples so callers get actionable
 error details (missing working dir, bad command, permission errors, etc.).
+Each captured line is passed to the log callback with the stream it came
+from (stdout or stderr) and a level derived by the sluice's line classifier.
 """
 
 import asyncio
@@ -25,6 +27,7 @@ from typing import Callable
 
 from .config import config
 from .models import LogEntry, Service
+from .sluice import detect_level
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +54,10 @@ class ProcessManager:
         self._processes: dict[str, ProcessInfo] = {}
         self._stop_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
-        self._on_log: Callable[[str, str, str], None] = None
+        self._on_log: Callable[[str, str, str, str], None] = None
 
-    def set_log_callback(self, callback: Callable[[str, str, str], None]):
-        """Set callback for log entries: callback(service_name, level, message)."""
+    def set_log_callback(self, callback: Callable[[str, str, str, str], None]):
+        """Set callback for log entries: callback(service_name, stream, level, message)."""
         self._on_log = callback
 
     def start(self, service: Service) -> tuple[bool, str]:
@@ -130,12 +133,12 @@ class ProcessManager:
 
             stdout_thread = threading.Thread(
                 target=self._capture_output,
-                args=(service.name, process.stdout, "info", stdout_log, stop_event),
+                args=(service.name, process.stdout, "stdout", stdout_log, stop_event),
                 daemon=True,
             )
             stderr_thread = threading.Thread(
                 target=self._capture_output,
-                args=(service.name, process.stderr, "error", stderr_log, stop_event),
+                args=(service.name, process.stderr, "stderr", stderr_log, stop_event),
                 daemon=True,
             )
 
@@ -249,7 +252,7 @@ class ProcessManager:
         self,
         service_name: str,
         stream,
-        level: str,
+        stream_name: str,
         log_file,
         stop_event: threading.Event,
     ):
@@ -280,18 +283,10 @@ class ProcessManager:
                     log_file.write(f"[{timestamp}] {decoded}\n")
                     log_file.flush()
 
-                    # Detect error level from content (ignore stream source —
-                    # many tools like Flask/uvicorn write normal output to stderr)
-                    detected_level = "info"
-                    lower = decoded.lower()
-                    if "error" in lower or "exception" in lower or "traceback" in lower:
-                        detected_level = "error"
-                    elif "warning" in lower or "warn" in lower:
-                        detected_level = "warning"
-
-                    # Call callback if set
                     if self._on_log:
-                        self._on_log(service_name, detected_level, decoded)
+                        self._on_log(
+                            service_name, stream_name, detect_level(stream_name, decoded), decoded
+                        )
 
                 except Exception as e:
                     logger.error(f"Error processing log line for {service_name}: {e}")

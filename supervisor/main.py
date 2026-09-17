@@ -29,7 +29,7 @@ from .cron import cron_manager
 from .fixer import auto_fixer
 from .robot_integration import run_robot_onboard, run_security_scan, stream_robot_chat, resolve_project_path
 from .jobs import JobStatus, job_manager
-from .models import CronExecution, CronJob, FixAttempt, LogEntry, Metric, Service, initialize_db
+from .models import CronExecution, CronJob, FixAttempt, Incident, LogEntry, Metric, Service, initialize_db
 from .monitor import resource_monitor
 from .process import process_manager
 
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     # Wire up log callback to auto-fixer (with service model cache)
     _service_cache: dict[str, Service] = {}
 
-    def log_callback(service_name: str, level: str, message: str):
+    def log_callback(service_name: str, stream: str, level: str, message: str):
         service = _service_cache.get(service_name)
         if service is None:
             # Don't cache misses: the service may simply not exist yet
@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
                 _service_cache[service_name] = service
         if service:
             LogEntry.create(service=service, level=level, message=message[:2000])
-        auto_fixer.on_log(service_name, level, message)
+        auto_fixer.on_log(service_name, stream, level, message)
 
     process_manager.set_log_callback(log_callback)
 
@@ -528,6 +528,35 @@ async def get_fix_history(name: str, limit: int = Query(20, ge=1, le=100)):
         .limit(limit)
     )
     return [f.to_dict() for f in fixes]
+
+
+@app.get("/api/services/{name}/incidents")
+async def get_service_incidents(name: str, limit: int = Query(20, ge=1, le=100)):
+    """Get error-sluice review history for a service."""
+    service = Service.get_or_none(Service.name == name)
+    if not service:
+        raise HTTPException(status_code=404, detail=f"Service '{name}' not found")
+
+    incidents = (
+        Incident.select()
+        .where(Incident.service == service)
+        .order_by(Incident.timestamp.desc())
+        .limit(limit)
+    )
+    return [i.to_dict() for i in incidents]
+
+
+@app.get("/api/incidents")
+async def list_incidents(
+    decision: Optional[str] = Query(None, description="Filter by decision"),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Recent error-sluice reviews across all services and cron jobs."""
+    query = Incident.select()
+    if decision:
+        query = query.where(Incident.decision == decision)
+    incidents = query.order_by(Incident.timestamp.desc()).limit(limit)
+    return [i.to_dict() for i in incidents]
 
 
 @app.post("/api/fixes/{fix_id}/restore")

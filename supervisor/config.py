@@ -2,7 +2,9 @@
 Configuration for the supervisor service.
 
 Loads settings from environment variables with sensible defaults.
-All persistent data is stored in ~/.supervisor/
+All persistent data is stored in ~/.supervisor/. The error sluice settings
+control how output is escalated: regex window size, the Jev classification
+interval and thresholds, and the coding-agent cooldown and daily cap.
 """
 
 import os
@@ -12,6 +14,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path.home() / ".env")
 
 
 @dataclass
@@ -61,9 +65,27 @@ class Config:
     monitor_interval: int = int(os.environ.get("MONITOR_INTERVAL", "300"))
     log_retention_days: int = int(os.environ.get("LOG_RETENTION_DAYS", "3"))
 
-    # Auto-fix
+    # Error sluice: tiers 1-2 (channel + regex) window
+    sluice_window_lines: int = int(os.environ.get("SLUICE_WINDOW_LINES", "80"))
+    sluice_sample_chars: int = int(os.environ.get("SLUICE_SAMPLE_CHARS", "6000"))
+
+    # Error sluice: tier 3 (Jev typed classification via TypeSafe)
+    typesafe_api_key: str = os.environ.get("TYPESAFE_API_KEY", "")
+    typesafe_url: str = os.environ.get("TYPESAFE_URL", "https://api.typesafe.ai/v1/systemone")
+    typesafe_model: str = os.environ.get("TYPESAFE_MODEL", "jev-latest")
+    jev_interval_minutes: int = int(os.environ.get("JEV_INTERVAL_MINUTES", "30"))
+    jev_threshold: float = float(os.environ.get("JEV_THRESHOLD", "0.7"))
+    jev_fixable_threshold: float = float(os.environ.get("JEV_FIXABLE_THRESHOLD", "0.6"))
+
+    # Error sluice: tier 4 (coding agent fix, rare last resort)
     autofix_enabled: bool = os.environ.get("AUTOFIX_ENABLED", "true").lower() == "true"
-    autofix_timeout: int = int(os.environ.get("AUTOFIX_TIMEOUT", "300"))
+    autofix_timeout: int = int(os.environ.get("AUTOFIX_TIMEOUT", "900"))
+    fix_model: str = os.environ.get("FIX_MODEL", "muse-spark-1.3-contributor")
+    fix_reasoning_effort: str = os.environ.get("FIX_REASONING_EFFORT", "medium")
+    fix_max_steps: int = int(os.environ.get("FIX_MAX_STEPS", "80"))
+    fix_cooldown_minutes: int = int(os.environ.get("FIX_COOLDOWN_MINUTES", "360"))
+    fix_daily_cap: int = int(os.environ.get("FIX_DAILY_CAP", "6"))
+    backup_keep: int = int(os.environ.get("BACKUP_KEEP", "3"))
 
     # Process management
     restart_delay: int = int(os.environ.get("RESTART_DELAY", "5"))

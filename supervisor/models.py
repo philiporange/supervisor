@@ -2,7 +2,9 @@
 Database models for supervisor.
 
 Uses Peewee ORM with SQLite. Stores service definitions, log entries,
-resource metrics, auto-fix attempt history, and cron job schedules with execution history.
+resource metrics, error-sluice incidents, fix attempt history, and cron job
+schedules with execution history. initialize_db creates tables and adds any
+columns missing from tables created by earlier versions.
 """
 
 import os
@@ -22,6 +24,8 @@ from peewee import (
     TextField,
 )
 
+from playhouse.migrate import SqliteMigrator, migrate
+
 from .config import config
 
 database = DatabaseProxy()
@@ -40,7 +44,10 @@ def initialize_db():
         },
     )
     database.initialize(db)
-    database.create_tables([Service, LogEntry, Metric, FixAttempt, CronJob, CronExecution], safe=True)
+    database.create_tables(
+        [Service, LogEntry, Metric, FixAttempt, CronJob, CronExecution, Incident], safe=True
+    )
+    _add_missing_columns(db, FixAttempt)
     # Composite indexes for the hot queries (filter by FK, order by time).
     # Created here because create_tables skips existing tables.
     db.execute_sql(
@@ -55,6 +62,16 @@ def initialize_db():
         "CREATE INDEX IF NOT EXISTS cron_executions_job_started "
         "ON cron_executions (cron_job_id, started_at)"
     )
+
+
+def _add_missing_columns(db, model):
+    """Add columns declared on the model but absent from an existing table."""
+    table = model._meta.table_name
+    existing = {row[1] for row in db.execute_sql(f"PRAGMA table_info({table})").fetchall()}
+    migrator = SqliteMigrator(db)
+    for field in model._meta.fields.values():
+        if field.column_name not in existing:
+            migrate(migrator.add_column(table, field.column_name, field))
 
 
 class BaseModel(Model):
@@ -162,7 +179,7 @@ class Metric(BaseModel):
 
 
 class FixAttempt(BaseModel):
-    """Record of a Robot auto-fix attempt."""
+    """Record of a coding-agent fix attempt (the sluice's final tier)."""
 
     id = AutoField()
     service = ForeignKeyField(Service, backref="fix_attempts", on_delete="CASCADE")
@@ -173,6 +190,8 @@ class FixAttempt(BaseModel):
     backup_path = CharField(null=True)  # Path to backup directory
     restored = BooleanField(default=False)  # Whether backup was restored
     timestamp = DateTimeField(default=datetime.now, index=True)
+    model = CharField(null=True)
+    verdict = CharField(null=True)  # fixed, not_a_code_bug, unable, error
 
     class Meta:
         table_name = "fix_attempts"
@@ -189,6 +208,8 @@ class FixAttempt(BaseModel):
             "restored": self.restored,
             "can_restore": bool(self.backup_path and not self.restored),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "model": self.model,
+            "verdict": self.verdict,
         }
 
 
@@ -292,4 +313,48 @@ class CronExecution(BaseModel):
             "memory_mb": self.memory_mb,
             "fix_attempted": self.fix_attempted,
             "fix_success": self.fix_success,
+        }
+
+
+class Incident(BaseModel):
+    """One pass of a service's (or cron job's) output through the error sluice.
+
+    Recorded whenever tier 3 (Jev) reviews a window, so the decision trail
+    for every escalation, dismissal, and cooldown skip can be audited and the
+    thresholds tuned against real hits and misses.
+    """
+
+    id = AutoField()
+    service = ForeignKeyField(Service, backref="incidents", on_delete="CASCADE", null=True)
+    cron_job = ForeignKeyField(CronJob, backref="incidents", on_delete="CASCADE", null=True)
+    timestamp = DateTimeField(default=datetime.now, index=True)
+    sample = TextField()
+    strong_hits = IntegerField(default=0)
+    jev_kind = CharField(null=True)
+    jev_probabilities = TextField(null=True)  # JSON dict
+    jev_fixable = FloatField(null=True)
+    jev_persistent = FloatField(null=True)
+    jev_tokens = IntegerField(null=True)
+    decision = CharField()  # dismissed, jev_unavailable, cooldown, daily_cap, disabled, fix_attempted
+    fix_attempt = ForeignKeyField(FixAttempt, null=True, on_delete="SET NULL")
+
+    class Meta:
+        table_name = "incidents"
+
+    def to_dict(self) -> dict:
+        import json
+        return {
+            "id": self.id,
+            "service_id": self.service_id,
+            "cron_job_id": self.cron_job_id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "sample": self.sample,
+            "strong_hits": self.strong_hits,
+            "jev_kind": self.jev_kind,
+            "jev_probabilities": json.loads(self.jev_probabilities) if self.jev_probabilities else None,
+            "jev_fixable": self.jev_fixable,
+            "jev_persistent": self.jev_persistent,
+            "jev_tokens": self.jev_tokens,
+            "decision": self.decision,
+            "fix_attempt_id": self.fix_attempt_id,
         }
