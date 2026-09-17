@@ -33,7 +33,32 @@ def test_decide_respects_cooldown_and_cap(db, monkeypatch):
     assert f._decide("svc", verdict()) == "cooldown"
     assert f._decide("other", verdict()) == "daily_cap"
     monkeypatch.setattr(config, "autofix_enabled", False)
+    monkeypatch.setattr(config, "diagnose_enabled", False)
     assert f._decide("other", verdict()) == "disabled"
+
+
+def test_decide_diagnoses_when_autofix_off(db, monkeypatch):
+    monkeypatch.setattr(config, "autofix_enabled", False)
+    monkeypatch.setattr(config, "diagnose_enabled", True)
+    monkeypatch.setattr(config, "diagnose_daily_cap", 1)
+    svc = models.Service.create(name="svc", command="python app.py")
+    f = fixer.AutoFixer()
+    assert f._decide("svc", verdict()) == "diagnosed"
+    models.Incident.create(service=svc, sample="x", decision="diagnosed")
+    assert f._decide("svc", verdict()) == "cooldown"
+    assert f._decide("other", verdict()) == "daily_cap"
+
+
+def test_should_notify_skips_noise_and_cooldown(db, monkeypatch):
+    monkeypatch.setattr(config, "notify_cooldown_minutes", 60)
+    svc = models.Service.create(name="svc", command="python app.py")
+    f = fixer.AutoFixer()
+    assert f._should_notify("svc", verdict("external"))
+    assert not f._should_notify("svc", verdict("noise"))
+    assert f._should_notify("svc", None)
+    models.Incident.create(service=svc, sample="x", decision="dismissed", notified=True)
+    assert not f._should_notify("svc", verdict("external"))
+    assert f._should_notify("other", verdict("external"))
 
 
 def test_on_log_only_windows_candidates():

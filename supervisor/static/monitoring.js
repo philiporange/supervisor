@@ -1,6 +1,6 @@
 /**
  * Monitoring functionality for the supervisor dashboard.
- * Handles service logs, supervisor logs, metrics charts, and fix history.
+ * Handles service logs, supervisor logs, metrics charts, incidents, and fix history.
  */
 
 // Service Logs
@@ -307,5 +307,56 @@ async function refreshFixes() {
         `).join('');
     } catch (e) {
         document.getElementById('fixes-content').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+    }
+}
+
+// Incidents
+const DECISION_COLORS = {
+    diagnosed: 'border-l-blue-500',
+    fix_attempted: 'border-l-green-500',
+    dismissed: 'border-l-gray-600',
+    jev_unavailable: 'border-l-yellow-500',
+    cooldown: 'border-l-gray-600',
+    daily_cap: 'border-l-gray-600',
+    disabled: 'border-l-gray-600',
+};
+
+async function showServiceIncidents(name) {
+    currentService = name;
+    document.getElementById('incidents-title').textContent = name;
+    showModal('incidents-modal');
+    await refreshIncidents();
+}
+
+function formatProbabilities(probs) {
+    if (!probs) return '';
+    return Object.entries(probs)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k} ${Math.round(v * 100)}%`)
+        .join(' · ');
+}
+
+async function refreshIncidents() {
+    if (!currentService) return;
+    const content = document.getElementById('incidents-content');
+    try {
+        const incidents = await api('GET', `/services/${currentService}/incidents`);
+        if (!incidents.length) {
+            content.innerHTML = '<p class="text-gray-600">No incidents</p>';
+            return;
+        }
+        content.innerHTML = incidents.map(i => `
+            <div class="bg-[#111] border-l-2 ${DECISION_COLORS[i.decision] || 'border-l-gray-600'} border border-gray-800 p-3">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm text-gray-200">${escapeHtml(i.decision)}${i.jev_kind ? ` · ${escapeHtml(i.jev_kind)}` : ''}${i.notified ? ' · notified' : ''}</span>
+                    <span class="text-xs text-gray-500 font-mono">${formatTime(i.timestamp)}</span>
+                </div>
+                <div class="text-xs text-gray-500 mb-2">${i.strong_hits} strong hits${i.jev_probabilities ? ` · ${formatProbabilities(i.jev_probabilities)}` : ''}${i.jev_fixable != null ? ` · fixable ${Math.round(i.jev_fixable * 100)}%` : ''}</div>
+                <pre class="text-xs text-gray-400 whitespace-pre-wrap mb-2 max-h-24 overflow-auto">${escapeHtml(i.sample)}</pre>
+                ${i.diagnosis ? `<div class="text-xs text-blue-300 mb-1">Diagnosis</div><pre class="text-xs text-gray-300 whitespace-pre-wrap max-h-64 overflow-auto">${escapeHtml(i.diagnosis)}</pre>` : ''}
+            </div>
+        `).join('');
+    } catch (e) {
+        content.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
     }
 }

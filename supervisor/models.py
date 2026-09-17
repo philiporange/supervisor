@@ -48,6 +48,7 @@ def initialize_db():
         [Service, LogEntry, Metric, FixAttempt, CronJob, CronExecution, Incident], safe=True
     )
     _add_missing_columns(db, FixAttempt)
+    _add_missing_columns(db, Incident)
     # Composite indexes for the hot queries (filter by FK, order by time).
     # Created here because create_tables skips existing tables.
     db.execute_sql(
@@ -330,8 +331,10 @@ class Incident(BaseModel):
     jev_fixable = FloatField(null=True)
     jev_persistent = FloatField(null=True)
     jev_tokens = IntegerField(null=True)
-    decision = CharField()  # dismissed, jev_unavailable, cooldown, daily_cap, disabled, fix_attempted
+    decision = CharField()  # dismissed, jev_unavailable, cooldown, daily_cap, disabled, diagnosed, fix_attempted
     fix_attempt = ForeignKeyField(FixAttempt, null=True, on_delete="SET NULL")
+    diagnosis = TextField(null=True)
+    notified = BooleanField(default=False)
 
     class Meta:
         table_name = "incidents"
@@ -352,4 +355,6 @@ class Incident(BaseModel):
             "jev_tokens": self.jev_tokens,
             "decision": self.decision,
             "fix_attempt_id": self.fix_attempt_id,
+            "diagnosis": self.diagnosis,
+            "notified": self.notified,
         }

@@ -193,8 +193,10 @@ async function ctxAction(action) {
         case 'restart': await restartService(name); break;
         case 'logs': showServiceLogs(name); break;
         case 'metrics': showServiceMetrics(name); break;
+        case 'incidents': showServiceIncidents(name); break;
         case 'fixes': showServiceFixes(name); break;
         case 'fix': await triggerFix(name); break;
+        case 'diagnose': await triggerDiagnose(name); break;
         case 'security': showSecurityScan(name); break;
         case 'edit': await showEditModal(name); break;
         case 'delete': await deleteService(name); break;
@@ -241,6 +243,13 @@ async function triggerFix(name) {
     try {
         const res = await api('POST', `/services/${name}/fix`);
         toast(`Fix job started: ${res.job_id}`, 'success');
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function triggerDiagnose(name) {
+    try {
+        const res = await api('POST', `/services/${name}/diagnose`);
+        toast(`Diagnosis started: ${res.job_id}`, 'success');
     } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

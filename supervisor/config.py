@@ -4,7 +4,8 @@ Configuration for the supervisor service.
 Loads settings from environment variables with sensible defaults.
 All persistent data is stored in ~/.supervisor/. The error sluice settings
 control how output is escalated: regex window size, the Jev classification
-interval and thresholds, and the coding-agent cooldown and daily cap.
+interval and thresholds, the read-only diagnosis agent's cooldown and daily
+cap, the optional auto-fix agent, and Telegram notification credentials.
 """
 
 import os
@@ -77,7 +78,16 @@ class Config:
     jev_threshold: float = float(os.environ.get("JEV_THRESHOLD", "0.7"))
     jev_fixable_threshold: float = float(os.environ.get("JEV_FIXABLE_THRESHOLD", "0.6"))
 
-    # Error sluice: tier 4 (coding agent fix, rare last resort)
+    # Error sluice: tier 4 (read-only diagnosis by a coding agent)
+    diagnose_enabled: bool = os.environ.get("DIAGNOSE_ENABLED", "true").lower() == "true"
+    diagnose_model: str = os.environ.get("DIAGNOSE_MODEL", "muse-spark-1.3-contributor")
+    diagnose_reasoning_effort: str = os.environ.get("DIAGNOSE_REASONING_EFFORT", "medium")
+    diagnose_timeout: int = int(os.environ.get("DIAGNOSE_TIMEOUT", "600"))
+    diagnose_max_steps: int = int(os.environ.get("DIAGNOSE_MAX_STEPS", "40"))
+    diagnose_cooldown_minutes: int = int(os.environ.get("DIAGNOSE_COOLDOWN_MINUTES", "360"))
+    diagnose_daily_cap: int = int(os.environ.get("DIAGNOSE_DAILY_CAP", "12"))
+
+    # Error sluice: tier 5 (coding agent fix, off by default)
     autofix_enabled: bool = os.environ.get("AUTOFIX_ENABLED", "false").lower() == "true"
     autofix_timeout: int = int(os.environ.get("AUTOFIX_TIMEOUT", "900"))
     fix_model: str = os.environ.get("FIX_MODEL", "muse-spark-1.3-contributor")
@@ -85,6 +95,11 @@ class Config:
     fix_max_steps: int = int(os.environ.get("FIX_MAX_STEPS", "80"))
     fix_cooldown_minutes: int = int(os.environ.get("FIX_COOLDOWN_MINUTES", "360"))
     fix_daily_cap: int = int(os.environ.get("FIX_DAILY_CAP", "6"))
+
+    # Notifications: Telegram Bot API
+    telegram_token: str = os.environ.get("TELEGRAM_TOKEN", "")
+    telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    notify_cooldown_minutes: int = int(os.environ.get("NOTIFY_COOLDOWN_MINUTES", "360"))
 
     # Process management
     restart_delay: int = int(os.environ.get("RESTART_DELAY", "5"))

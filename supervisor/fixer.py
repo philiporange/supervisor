@@ -1,23 +1,29 @@
 """
-Auto-fix orchestration: the final two tiers of the error sluice.
+Auto-fix orchestration: the review, diagnosis, fix, and notification tiers
+of the error sluice.
 
 Log lines arrive via on_log after the process manager has captured them.
 Tiers 1 and 2 (channel and regex, in sluice.py) decide per line whether it
 enters a per-service window. Once a minute the loop checks each window: if
 it holds strong hits and the Jev interval has elapsed, the window is sent to
-Jev (tier 3) for a typed verdict on what kind of failure it shows. Only a
-verdict of a repo-fixable code or dependency fault, outside the per-service
-cooldown and under the daily cap, reaches tier 4: a coding agent run in the
-service's working directory. Tier 4 is off unless AUTOFIX_ENABLED is set;
-the dashboard's manual Trigger Fix still works. Every Jev review is recorded
-as an Incident so decisions can be audited; every agent run is a FixAttempt
-listing the files it changed. Nothing is copied aside first: the host keeps
-its own daily copies of every project.
+Jev (tier 3) for a typed verdict on what kind of failure it shows. A verdict
+of a repo-fixable code or dependency fault, outside the per-service cooldown
+and under the daily cap, reaches tier 4: a read-only coding agent run in the
+service's working directory that diagnoses the fault and plans a fix without
+changing anything. Tier 5, an agent that actually edits the repo, replaces
+tier 4 only when AUTOFIX_ENABLED is set; the dashboard's manual Trigger Fix
+still works. Every Jev review is recorded as an Incident so decisions can be
+audited; every agent fix run is a FixAttempt listing the files it changed.
+Nothing is copied aside first: the host keeps its own daily copies of every
+project.
 
-Fix runs happen in background tasks, one service at a time, so a slow agent
-never blocks reviews of other services. Cooldowns are derived from stored
-FixAttempt timestamps and survive supervisor restarts. Failed cron jobs go
-through the same tiers using the execution's captured output.
+Any incident Jev does not call noise is reported over Telegram, subject to a
+per-service notification cooldown; a diagnosis or fix outcome is always
+reported and carries the agent's report. Agent runs happen in background
+tasks, one at a time, so a slow agent never blocks reviews of other
+services. Cooldowns are derived from stored Incident timestamps and survive
+supervisor restarts. Failed cron jobs go through the same tiers using the
+execution's captured output.
 """
 
 import asyncio
@@ -27,8 +33,9 @@ import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import notify
 from .config import config
-from .fix_agent import build_prompt, run_fix
+from .fix_agent import DIAGNOSE_PROMPT_PATH, build_prompt, run_diagnosis, run_fix
 from .models import CronExecution, CronJob, FixAttempt, Incident, LogEntry, Service
 from .process import process_manager
 from .sluice import (
@@ -55,19 +62,28 @@ def working_dir_for(command: str, working_dir: str | None) -> str | None:
     return None
 
 
+def _incident_query(name: str, decision: str, since: datetime):
+    query = Incident.select().where(Incident.decision == decision, Incident.timestamp > since)
+    if name.startswith("cron:"):
+        return query.join(CronJob).where(CronJob.name == name[5:])
+    return query.join(Service).where(Service.name == name)
+
+
 class AutoFixer:
-    """Runs the sluice's review and fix tiers over service and cron output."""
+    """Runs the sluice's review, diagnosis, fix, and notification tiers."""
 
     def __init__(self):
         self._running = False
         self._task = None
         self._windows: dict[str, Window] = {}
-        self._fix_tasks: set[asyncio.Task] = set()
-        self._fix_lock = asyncio.Lock()
+        self._agent_tasks: set[asyncio.Task] = set()
+        self._agent_lock = asyncio.Lock()
 
     async def start(self):
         if not config.autofix_enabled:
-            logger.info("Auto-fix is disabled; output is still classified and windowed")
+            logger.info("Auto-fix is disabled; incidents are diagnosed read-only")
+        if not notify.enabled():
+            logger.info("Telegram notifications disabled (TELEGRAM_TOKEN or TELEGRAM_CHAT_ID unset)")
         if self._running:
             return
         self._running = True
@@ -82,7 +98,7 @@ class AutoFixer:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        for task in list(self._fix_tasks):
+        for task in list(self._agent_tasks):
             task.cancel()
         logger.info("Auto-fixer stopped")
 
@@ -131,7 +147,7 @@ class AutoFixer:
 
     async def _review(self, service: Service | None, cron_job: CronJob | None,
                       sample: str, strong_hits: int):
-        """Send a sample to Jev, record the Incident, and escalate if warranted."""
+        """Send a sample to Jev, record the Incident, then diagnose, fix, or notify."""
         name = service.name if service else f"cron:{cron_job.name}"
         command = service.command if service else cron_job.command
         verdict = await jev_review(name, command, sample)
@@ -151,55 +167,156 @@ class AutoFixer:
             incident.jev_tokens = verdict.input_tokens
             incident.decision = self._decide(name, verdict)
         incident.save()
+        logger.info(f"Sluice {name}: {incident.decision}"
+                    + (f" ({verdict.kind} p={verdict.kind_probability:.2f})" if verdict else ""))
 
-        if incident.decision != "fix_attempted":
-            logger.info(f"Sluice {name}: {incident.decision}"
-                        + (f" ({verdict.kind} p={verdict.kind_probability:.2f})" if verdict else ""))
-            return
+        if incident.decision == "fix_attempted":
+            self._spawn(self._run_fix(incident, service, cron_job, sample, verdict))
+        elif incident.decision == "diagnosed":
+            self._spawn(self._run_diagnosis(incident, service, cron_job, sample, verdict))
+        else:
+            await self._notify(incident, name, verdict)
 
-        task = asyncio.create_task(self._run_fix(incident, service, cron_job, sample, verdict))
-        self._fix_tasks.add(task)
-        task.add_done_callback(self._fix_tasks.discard)
+    def _spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._agent_tasks.add(task)
+        task.add_done_callback(self._agent_tasks.discard)
 
     def _decide(self, name: str, verdict: JevVerdict) -> str:
         if not verdict.should_escalate():
             return "dismissed"
-        if not config.autofix_enabled:
+        if config.autofix_enabled:
+            decision, cooldown, cap = "fix_attempted", config.fix_cooldown_minutes, config.fix_daily_cap
+        elif config.diagnose_enabled:
+            decision, cooldown, cap = "diagnosed", config.diagnose_cooldown_minutes, config.diagnose_daily_cap
+        else:
             return "disabled"
-        if self._in_cooldown(name):
+        if self._in_cooldown(name, decision, cooldown):
             return "cooldown"
-        if self._daily_cap_reached():
+        if self._daily_cap_reached(decision, cap):
             return "daily_cap"
-        return "fix_attempted"
+        return decision
 
-    def _in_cooldown(self, name: str) -> bool:
-        cutoff = datetime.now() - timedelta(minutes=config.fix_cooldown_minutes)
-        query = Incident.select().where(
-            Incident.decision == "fix_attempted", Incident.timestamp > cutoff
-        )
+    def _in_cooldown(self, name: str, decision: str, minutes: int) -> bool:
+        cutoff = datetime.now() - timedelta(minutes=minutes)
+        return _incident_query(name, decision, cutoff).exists()
+
+    def _daily_cap_reached(self, decision: str, cap: int) -> bool:
+        cutoff = datetime.now() - timedelta(hours=24)
+        count = Incident.select().where(
+            Incident.decision == decision, Incident.timestamp > cutoff
+        ).count()
+        return count >= cap
+
+    # -- Notifications --
+
+    def _should_notify(self, name: str, verdict: JevVerdict | None) -> bool:
+        if verdict and verdict.kind == "noise":
+            return False
+        cutoff = datetime.now() - timedelta(minutes=config.notify_cooldown_minutes)
+        query = Incident.select().where(Incident.notified == True, Incident.timestamp > cutoff)
         if name.startswith("cron:"):
             query = query.join(CronJob).where(CronJob.name == name[5:])
         else:
             query = query.join(Service).where(Service.name == name)
-        return query.exists()
+        return not query.exists()
 
-    def _daily_cap_reached(self) -> bool:
-        cutoff = datetime.now() - timedelta(hours=24)
-        count = Incident.select().where(
-            Incident.decision == "fix_attempted", Incident.timestamp > cutoff
-        ).count()
-        return count >= config.fix_daily_cap
+    async def _notify(self, incident: Incident, name: str, verdict: JevVerdict | None,
+                      diagnosis: str | None = None, fix: str | None = None):
+        """Send the incident to Telegram. Agent outcomes bypass the cooldown."""
+        if not notify.enabled():
+            return
+        if diagnosis is None and fix is None and not self._should_notify(name, verdict):
+            return
+        text = notify.format_incident(name, verdict, incident.sample, incident.strong_hits,
+                                      diagnosis=diagnosis, fix=fix)
+        if await notify.send(text):
+            incident.notified = True
+            incident.save()
 
-    # -- Tier 4: coding agent --
+    # -- Tier 4: read-only diagnosis --
+
+    def _target(self, service: Service | None, cron_job: CronJob | None):
+        """Display name, command, and working directory for a service or cron job."""
+        if service:
+            return service.name, service.command, working_dir_for(service.command, service.working_dir)
+        return (f"cron job {cron_job.name} (schedule {cron_job.schedule})", cron_job.command,
+                cron_job.working_dir)
+
+    async def _run_diagnosis(self, incident: Incident, service: Service | None,
+                             cron_job: CronJob | None, sample: str, verdict: JevVerdict | None):
+        name = service.name if service else f"cron:{cron_job.name}"
+        async with self._agent_lock:
+            try:
+                report = await self.diagnose(service, cron_job, sample, verdict)
+                incident.diagnosis = report
+                incident.save()
+                await self._notify(incident, name, verdict, diagnosis=report)
+            except Exception as e:
+                logger.error(f"Error during diagnosis for {name}: {e}")
+
+    async def diagnose(self, service: Service | None, cron_job: CronJob | None,
+                       sample: str, verdict: JevVerdict | None) -> str:
+        """Run the read-only agent and return its report text."""
+        name, command, working_dir = self._target(service, cron_job)
+        if not working_dir or not Path(working_dir).is_dir():
+            logger.error(f"Cannot determine working directory for {name}")
+            return "Could not determine working directory"
+        prompt = build_prompt(
+            name=name,
+            command=command,
+            working_dir=working_dir,
+            sample=sample,
+            kind=verdict.kind if verdict else "unknown",
+            kind_probability=verdict.kind_probability if verdict else 0.0,
+            fixable=verdict.fixable if verdict else 0.0,
+            template_path=DIAGNOSE_PROMPT_PATH,
+        )
+        logger.info(f"Diagnosing {name}")
+        result = await asyncio.to_thread(run_diagnosis, working_dir, prompt)
+        level = logger.info if result.success else logger.warning
+        level(f"Diagnosis for {name}: {'ok' if result.success else result.error} in {result.duration:.0f}s")
+        if result.error:
+            return f"Diagnosis failed: {result.error}"
+        return result.report[-8000:]
+
+    async def manual_diagnose(self, service: Service) -> dict:
+        """Dashboard-triggered diagnosis: skips Jev and cooldowns, uses recent errors."""
+        sample = self._recent_error_sample(service)
+        if not sample:
+            return {"error": "No errors to diagnose"}
+        async with self._agent_lock:
+            report = await self.diagnose(service, None, sample, None)
+            incident = Incident.create(
+                service=service, sample=sample, strong_hits=0, decision="diagnosed", diagnosis=report,
+            )
+            await self._notify(incident, service.name, None, diagnosis=report)
+        return incident.to_dict()
+
+    def _recent_error_sample(self, service: Service) -> str:
+        sample = self.recent_errors(service.name)
+        if sample:
+            return sample
+        recent_logs = (
+            LogEntry.select()
+            .where(LogEntry.service == service, LogEntry.level == "error")
+            .order_by(LogEntry.timestamp.desc())
+            .limit(30)
+        )
+        return "\n".join(f"[E] {log.message}" for log in reversed(list(recent_logs)))
+
+    # -- Tier 5: coding agent fix --
 
     async def _run_fix(self, incident: Incident, service: Service | None,
                        cron_job: CronJob | None, sample: str, verdict: JevVerdict | None):
-        async with self._fix_lock:
+        name = service.name if service else f"cron:{cron_job.name}"
+        async with self._agent_lock:
             try:
                 if service:
                     attempt = await self.attempt_fix(service, sample, verdict)
                     incident.fix_attempt = attempt
                     incident.save()
+                    summary = f"{attempt.verdict}, files={attempt.files_modified or '[]'}"
                     if attempt.success:
                         window = self._windows.get(service.name)
                         if window:
@@ -207,10 +324,12 @@ class AutoFixer:
                         success, msg = await asyncio.to_thread(process_manager.restart, service)
                         if not success:
                             logger.warning(f"Fix applied but restart failed for {service.name}: {msg}")
+                            summary += f"; restart failed: {msg}"
                 else:
-                    await self._fix_cron(cron_job, sample, verdict)
+                    summary = await self._fix_cron(cron_job, sample, verdict)
+                await self._notify(incident, name, verdict, fix=summary)
             except Exception as e:
-                logger.error(f"Error during fix for {incident.service_id or incident.cron_job_id}: {e}")
+                logger.error(f"Error during fix for {name}: {e}")
 
     async def attempt_fix(self, service: Service, error_text: str,
                           verdict: JevVerdict | None = None) -> FixAttempt:
@@ -256,15 +375,7 @@ class AutoFixer:
     async def manual_fix(self, service: Service, error_description: str = None) -> dict:
         """Dashboard-triggered fix: skips Jev and cooldowns, uses recent errors if none given."""
         if not error_description:
-            error_description = self.recent_errors(service.name)
-        if not error_description:
-            recent_logs = (
-                LogEntry.select()
-                .where(LogEntry.service == service, LogEntry.level == "error")
-                .order_by(LogEntry.timestamp.desc())
-                .limit(30)
-            )
-            error_description = "\n".join(f"[E] {log.message}" for log in reversed(list(recent_logs)))
+            error_description = self._recent_error_sample(service)
 
         if not error_description:
             fix = FixAttempt.create(
@@ -277,9 +388,9 @@ class AutoFixer:
             )
             return fix.to_dict()
 
-        async with self._fix_lock:
+        async with self._agent_lock:
             fix = await self.attempt_fix(service, error_description)
-            Incident.create(
+            incident = Incident.create(
                 service=service, sample=error_description, strong_hits=0,
                 decision="fix_attempted", fix_attempt=fix,
             )
@@ -288,6 +399,8 @@ class AutoFixer:
                 if window:
                     window.clear()
                 await asyncio.to_thread(process_manager.restart, service)
+            await self._notify(incident, service.name, None,
+                               fix=f"{fix.verdict}, files={fix.files_modified or '[]'}")
         return fix.to_dict()
 
     # -- Cron jobs --
@@ -303,11 +416,11 @@ class AutoFixer:
         await self._review(None, cron_job, sample, strong_hits)
         return False
 
-    async def _fix_cron(self, cron_job: CronJob, sample: str, verdict: JevVerdict | None):
+    async def _fix_cron(self, cron_job: CronJob, sample: str, verdict: JevVerdict | None) -> str:
         working_dir = cron_job.working_dir
         if not working_dir or not Path(working_dir).is_dir():
             logger.warning(f"No working directory for cron job {cron_job.name}, cannot fix")
-            return
+            return "no working directory"
 
         prompt = build_prompt(
             name=f"cron job {cron_job.name} (schedule {cron_job.schedule})",
@@ -331,6 +444,7 @@ class AutoFixer:
             latest.save()
         level = logger.info if result.success else logger.warning
         level(f"Fix for cron job {cron_job.name}: {result.verdict}, files={result.files_modified}")
+        return f"{result.verdict}, files={result.files_modified}"
 
 
 # Global auto-fixer instance

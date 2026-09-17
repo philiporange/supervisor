@@ -84,7 +84,8 @@ Projects use `~/.{project_name}/` as the default data directory for databases, l
 | GET | /api/services/{name}/fixes | Get fix attempt history |
 | POST | /api/services/{name}/security-scan | Run security scan (background job) |
 | GET | /api/services/{name}/security-scan/latest | Get latest security scan results |
-| GET | /api/services/{name}/incidents | Error-sluice review history |
+| GET | /api/services/{name}/incidents | Error-sluice review history, with diagnoses |
+| POST | /api/services/{name}/diagnose | Run the read-only diagnosis agent on recent errors |
 | GET | /api/incidents | Recent reviews across all services |
 | GET | /api/status | Overview of all services |
 | GET | /api/cron | List all cron jobs |
@@ -182,7 +183,8 @@ Cron jobs capture stdout/stderr, track CPU/memory usage during execution, and ca
 - **Cron Scheduling** - Run scripts on cron schedules with execution history and resource tracking
 - **Log Capture** - Stores stdout/stderr in SQLite and size-rotated log files
 - **Resource Monitoring** - Tracks CPU/memory/disk usage per service and cron job
-- **Error Sluice** - Tiered error detection: stderr channel, regex, then a cheap Jev typed classifier, and only as a last resort a coding agent that fixes the repo (off by default, with an audit trail)
+- **Error Sluice** - Tiered error detection: stderr channel, regex, a cheap Jev typed classifier, then a read-only coding agent that diagnoses the fault and plans a fix. An agent that edits the repo is available but off by default. Every review is recorded as an incident
+- **Telegram Notifications** - Incidents Jev does not call noise are sent to Telegram, with a per-service cooldown; diagnoses and fix outcomes always are
 - **Security Scanning** - AI-powered security analysis for Caddy-exposed services
 - **AI Onboarding** - Analyze projects and register them automatically using Robot AI
 - **AI Chat** - Interactive chat assistant for project help and debugging
@@ -216,7 +218,17 @@ Environment variables (or `.env` file):
 | JEV_INTERVAL_MINUTES | 30 | Minimum gap between Jev reviews of one service |
 | JEV_THRESHOLD | 0.7 | code_bug + dependency probability needed to escalate |
 | JEV_FIXABLE_THRESHOLD | 0.6 | Repo-fixable probability needed to escalate |
-| AUTOFIX_ENABLED | false | Allow the coding-agent tier to run automatically |
+| DIAGNOSE_ENABLED | true | Run the read-only diagnosis agent on repo-fixable incidents |
+| DIAGNOSE_MODEL | muse-spark-1.3-contributor | Model passed to `muse exec` for diagnosis |
+| DIAGNOSE_REASONING_EFFORT | medium | Reasoning effort for the diagnosis agent |
+| DIAGNOSE_TIMEOUT | 600 | Diagnosis agent timeout (seconds) |
+| DIAGNOSE_MAX_STEPS | 40 | Cap on agent model steps per diagnosis |
+| DIAGNOSE_COOLDOWN_MINUTES | 360 | Minimum gap between diagnoses of one service |
+| DIAGNOSE_DAILY_CAP | 12 | Maximum diagnoses per 24 hours across all services |
+| TELEGRAM_TOKEN | | Telegram bot token for notifications |
+| TELEGRAM_CHAT_ID | | Telegram chat that receives notifications |
+| NOTIFY_COOLDOWN_MINUTES | 360 | Minimum gap between notifications about one service |
+| AUTOFIX_ENABLED | false | Allow the repo-editing agent to run automatically instead of diagnosis |
 | AUTOFIX_TIMEOUT | 900 | Coding-agent timeout (seconds) |
 | FIX_MODEL | muse-spark-1.3-contributor | Model passed to `muse exec` |
 | FIX_REASONING_EFFORT | medium | Reasoning effort for the fix agent |

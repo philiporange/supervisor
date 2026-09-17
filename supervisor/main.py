@@ -514,6 +514,21 @@ async def trigger_fix(name: str, error_description: Optional[str] = None):
     return {"job_id": job.id, "status": "started", "service": service.name}
 
 
+@app.post("/api/services/{name}/diagnose")
+async def trigger_diagnose(name: str):
+    """Run the read-only diagnosis agent on recent errors. Runs in background, returns job ID."""
+    service = Service.get_or_none(Service.name == name)
+    if not service:
+        raise HTTPException(status_code=404, detail=f"Service '{name}' not found")
+
+    job = await job_manager.run_async_in_background(
+        f"diagnose:{service.name}",
+        auto_fixer.manual_diagnose,
+        service,
+    )
+    return {"job_id": job.id, "status": "started", "service": service.name}
+
+
 @app.get("/api/services/{name}/fixes")
 async def get_fix_history(name: str, limit: int = Query(20, ge=1, le=100)):
     """Get fix attempt history for a service."""

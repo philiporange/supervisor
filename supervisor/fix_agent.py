@@ -1,12 +1,15 @@
 """
-Coding-agent runner for the final tier of the error sluice.
+Coding-agent runners for the last two tiers of the error sluice.
 
-Runs `muse exec` headlessly in a service's working directory with the fix
-prompt from prompts/fix.md. The agent is asked to end with a VERDICT line
-(fixed, not_a_code_bug, unable) which is parsed from its output. Files it
-changed are found by diffing `git status --porcelain` before and after the
-run, so the result is trustworthy even when the agent's own report is not.
-Everything here is blocking and meant to be called via asyncio.to_thread.
+Both run `muse exec` headlessly in a service's working directory. The
+diagnosis run (prompts/diagnose.md) launches the agent with filesystem writes
+and shell execution disabled and returns its written report; the fix run
+(prompts/fix.md) lets the agent edit the repo and asks it to end with a
+VERDICT line (fixed, not_a_code_bug, unable) which is parsed from its output.
+Files changed are found by diffing `git status --porcelain` before and after
+either run, so a fix result is trustworthy even when the agent's own report
+is not, and a diagnosis that somehow wrote files is flagged. Everything here
+is blocking and meant to be called via asyncio.to_thread.
 """
 
 import logging
@@ -22,6 +25,7 @@ from .config import config
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "fix.md"
+DIAGNOSE_PROMPT_PATH = Path(__file__).parent / "prompts" / "diagnose.md"
 VERDICT_RE = re.compile(r"VERDICT:\s*(fixed|not_a_code_bug|unable)\b", re.IGNORECASE)
 
 
@@ -40,9 +44,24 @@ class FixResult:
         return self.verdict == "fixed" and bool(self.files_modified)
 
 
+@dataclass
+class DiagnosisResult:
+    """Outcome of one read-only diagnosis run."""
+
+    report: str
+    duration: float = 0.0
+    error: str | None = None
+    files_modified: list[str] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return self.error is None and bool(self.report.strip())
+
+
 def build_prompt(name: str, command: str, working_dir: str, sample: str,
-                 kind: str, kind_probability: float, fixable: float) -> str:
-    template = PROMPT_PATH.read_text()
+                 kind: str, kind_probability: float, fixable: float,
+                 template_path: Path = PROMPT_PATH) -> str:
+    template = template_path.read_text()
     return template.format(
         name=name,
         command=command,
@@ -76,9 +95,9 @@ def parse_verdict(output: str) -> str:
     return matches[-1].lower() if matches else "unable"
 
 
-def run_fix(working_dir: str, prompt: str, timeout: int | None = None) -> FixResult:
-    """Run the coding agent once in working_dir and return what it did."""
-    timeout = timeout or config.autofix_timeout
+def _run_muse(working_dir: str, prompt: str, model: str, reasoning_effort: str,
+              max_steps: int, timeout: int, extra_args: list[str]):
+    """Run one headless muse session. Returns (stdout, stderr, returncode, error, duration, files_modified)."""
     before = git_status(working_dir)
     start = time.time()
 
@@ -88,54 +107,66 @@ def run_fix(working_dir: str, prompt: str, timeout: int | None = None) -> FixRes
 
     cmd = [
         "muse", "exec",
-        "--model", config.fix_model,
-        "--reasoning-effort", config.fix_reasoning_effort,
+        "--model", model,
+        "--reasoning-effort", reasoning_effort,
         "--workspace", working_dir,
         "--disable-approval",
         "--user-input-auto-resolve",
         "--no-session-log",
-        "--max-model-steps", str(config.fix_max_steps),
+        "--max-model-steps", str(max_steps),
         "--prompt-file", prompt_file,
+        *extra_args,
     ]
-    logger.info(f"Running fix agent in {working_dir}: model={config.fix_model}")
+    logger.info(f"Running agent in {working_dir}: model={model} flags={extra_args}")
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=working_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        proc = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return FixResult(
-            verdict="error",
-            output="",
-            duration=time.time() - start,
-            error=f"agent timed out after {timeout}s",
-        )
+        return "", "", None, f"agent timed out after {timeout}s", time.time() - start, []
     except FileNotFoundError as e:
-        return FixResult(verdict="error", output="", duration=time.time() - start, error=str(e))
+        return "", "", None, str(e), time.time() - start, []
     finally:
         Path(prompt_file).unlink(missing_ok=True)
 
-    output = proc.stdout
     duration = time.time() - start
     after = git_status(working_dir)
-    if before is not None and after is not None:
-        files_modified = sorted(after - before)
-    else:
-        files_modified = []
-
+    files_modified = sorted(after - before) if before is not None and after is not None else []
+    error = None
     if proc.returncode != 0:
-        return FixResult(
-            verdict="error",
-            output=output,
-            files_modified=files_modified,
-            duration=duration,
-            error=(proc.stderr or f"exit code {proc.returncode}")[-2000:],
-        )
+        error = (proc.stderr or f"exit code {proc.returncode}")[-2000:]
+    return proc.stdout, proc.stderr, proc.returncode, error, duration, files_modified
+
+
+def run_diagnosis(working_dir: str, prompt: str, timeout: int | None = None) -> DiagnosisResult:
+    """Run the agent read-only and return its diagnosis report."""
+    output, _, _, error, duration, files_modified = _run_muse(
+        working_dir, prompt,
+        model=config.diagnose_model,
+        reasoning_effort=config.diagnose_reasoning_effort,
+        max_steps=config.diagnose_max_steps,
+        timeout=timeout or config.diagnose_timeout,
+        extra_args=["--disable-write", "--disable-shell"],
+    )
+    if files_modified:
+        logger.warning(f"Diagnosis run modified files in {working_dir}: {files_modified}")
+    return DiagnosisResult(report=output.strip(), duration=duration, error=error,
+                           files_modified=files_modified)
+
+
+def run_fix(working_dir: str, prompt: str, timeout: int | None = None) -> FixResult:
+    """Run the coding agent once in working_dir and return what it did."""
+    output, _, _, error, duration, files_modified = _run_muse(
+        working_dir, prompt,
+        model=config.fix_model,
+        reasoning_effort=config.fix_reasoning_effort,
+        max_steps=config.fix_max_steps,
+        timeout=timeout or config.autofix_timeout,
+        extra_args=[],
+    )
+    if error:
+        return FixResult(verdict="error", output=output, files_modified=files_modified,
+                         duration=duration, error=error)
 
     verdict = parse_verdict(output)
-    if verdict == "fixed" and not files_modified and before is not None:
+    if verdict == "fixed" and not files_modified and git_status(working_dir) is not None:
         verdict = "unable"
     return FixResult(verdict=verdict, output=output, files_modified=files_modified, duration=duration)
