@@ -362,6 +362,29 @@ async def delete_service(name: str):
 
 
 # Service control
+@app.post("/api/services/{name}/enable")
+async def enable_service(name: str):
+    """Mark a service to auto-start with the supervisor and restart after crashes."""
+    return _set_enabled(name, True)
+
+
+@app.post("/api/services/{name}/disable")
+async def disable_service(name: str):
+    """Stop auto-starting and crash-restarting a service. A running process is left alone."""
+    return _set_enabled(name, False)
+
+
+def _set_enabled(name: str, enabled: bool) -> dict:
+    service = Service.get_or_none(Service.name == name)
+    if not service:
+        raise HTTPException(status_code=404, detail=f"Service '{name}' not found")
+    service.enabled = enabled
+    service.updated_at = datetime.now()
+    service.save()
+    logger.info(f"Service {name} {'enabled' if enabled else 'disabled'}")
+    return _service_response(service)
+
+
 @app.post("/api/services/{name}/start")
 async def start_service(name: str):
     """Start a service."""

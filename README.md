@@ -76,6 +76,8 @@ Projects use `~/.{project_name}/` as the default data directory for databases, l
 | DELETE | /api/services/{name} | Remove service |
 | POST | /api/services/{name}/start | Start service |
 | POST | /api/services/{name}/stop | Stop service |
+| POST | /api/services/{name}/enable | Auto-start with the supervisor and restart after crashes |
+| POST | /api/services/{name}/disable | Never auto-start or crash-restart; a running process is left alone |
 | POST | /api/services/{name}/restart | Restart service |
 | GET | /api/services/{name}/logs | Get service logs |
 | GET | /api/services/{name}/metrics | Get resource history |

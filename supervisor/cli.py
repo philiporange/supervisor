@@ -136,6 +136,18 @@ def cmd_start(args):
         print(f"{args.name}: started (pid {data.get('pid', '?')})")
 
 
+def cmd_enable(args):
+    """Let a service auto-start with the supervisor and restart after crashes."""
+    data = api_request("post", f"/api/services/{args.name}/enable")
+    print(f"{data['name']}: auto-start enabled")
+
+
+def cmd_disable(args):
+    """Keep a service from auto-starting or being restarted; leaves a running process alone."""
+    data = api_request("post", f"/api/services/{args.name}/disable")
+    print(f"{data['name']}: auto-start disabled")
+
+
 def cmd_stop(args):
     """Stop a service."""
     data = api_request("post", f"/api/services/{args.name}/stop")
@@ -373,6 +385,12 @@ def build_parser():
     p = sub.add_parser("stop", help="Stop a service")
     p.add_argument("name", help="Service name")
 
+    p = sub.add_parser("enable", help="Auto-start a service with the supervisor")
+    p.add_argument("name", help="Service name")
+
+    p = sub.add_parser("disable", help="Do not auto-start or crash-restart a service")
+    p.add_argument("name", help="Service name")
+
     # restart
     p = sub.add_parser("restart", help="Restart a service")
     p.add_argument("name", help="Service name")
@@ -464,6 +482,8 @@ def main():
         "ls": cmd_ls,
         "start": cmd_start,
         "stop": cmd_stop,
+        "enable": cmd_enable,
+        "disable": cmd_disable,
         "restart": cmd_restart,
         "logs": cmd_logs,
         "add": cmd_add,

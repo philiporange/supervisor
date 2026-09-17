@@ -57,7 +57,7 @@ function renderHome() {
                class="block p-4 bg-[#0a0a0a] border border-gray-800 hover:border-gray-600 transition-all ${statusClass}"
                data-service="${s.name}">
                 <div class="flex items-center gap-2 mb-2">
-                    <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500 pulse-dot' : 'bg-red-500'}"></span>
+                    <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500 pulse-dot' : (s.enabled ? 'bg-red-500' : 'bg-gray-600')}"></span>
                     <span class="font-medium text-sm truncate">${escapeHtml(s.name)}</span>
                 </div>
                 <div class="text-xs text-gray-500 font-mono">
@@ -70,7 +70,7 @@ function renderHome() {
                 <div class="text-xs text-gray-600 font-mono">
                     up ${formatUptime(s.metrics.uptime_seconds)}${s.metrics.restart_count ? ` | ${s.metrics.restart_count} restarts` : ''}
                 </div>
-                ` : (s.running ? '' : '<div class="mt-2 text-xs text-gray-600 font-mono">stopped</div>')}
+                ` : (s.running ? '' : `<div class="mt-2 text-xs text-gray-600 font-mono">${s.enabled ? 'stopped' : 'disabled'}</div>`)}
                 ${incidentBadge(s, 'mt-1')}
             </a>
         `;
@@ -86,14 +86,14 @@ function renderServicesList() {
     }
 
     list.innerHTML = services.map(s => {
-        const statusClass = s.running ? 'border-l-green-500' : 'border-l-red-500';
+        const statusClass = s.running ? 'border-l-green-500' : (s.enabled ? 'border-l-red-500' : 'border-l-gray-600');
         return `
             <div class="bg-[#0a0a0a] border border-gray-800 border-l-2 ${statusClass} p-3 flex items-center justify-between"
                  data-service="${s.name}">
                 <div class="flex items-center gap-4">
-                    <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500' : 'bg-red-500'}"></span>
+                    <span class="w-2 h-2 rounded-full ${s.running ? 'bg-green-500' : (s.enabled ? 'bg-red-500' : 'bg-gray-600')}"></span>
                     <div>
-                        <div class="font-medium text-sm">${escapeHtml(s.name)}</div>
+                        <div class="font-medium text-sm">${escapeHtml(s.name)}${s.enabled ? '' : ' <span class="text-xs text-gray-500 font-normal">(auto-start off)</span>'}</div>
                         <div class="text-xs text-gray-500 font-mono">${s.port ? ':' + s.port : '-'} | PID: ${s.pid || '-'}</div>
                         ${incidentBadge(s)}
                     </div>
@@ -144,6 +144,8 @@ function updateContextMenu() {
     document.getElementById('ctx-open').disabled = !ctxService.port;
     document.getElementById('ctx-start').classList.toggle('hidden', ctxService.running);
     document.getElementById('ctx-stop').classList.toggle('hidden', !ctxService.running);
+    document.getElementById('ctx-disable').classList.toggle('hidden', !ctxService.enabled);
+    document.getElementById('ctx-enable').classList.toggle('hidden', ctxService.enabled);
     document.getElementById('ctx-security').classList.toggle('hidden',
         !ctxService.expose_caddy || !ctxService.caddy_subdomain);
 
@@ -201,6 +203,8 @@ async function ctxAction(action) {
         case 'start': await startService(name); break;
         case 'stop': await stopService(name); break;
         case 'restart': await restartService(name); break;
+        case 'enable': await setServiceEnabled(name, true); break;
+        case 'disable': await setServiceEnabled(name, false); break;
         case 'logs': showServiceLogs(name); break;
         case 'metrics': showServiceMetrics(name); break;
         case 'incidents': showServiceIncidents(name); break;
@@ -218,6 +222,14 @@ async function startService(name) {
     try {
         await api('POST', `/services/${name}/start`);
         toast(`${name} started`, 'success');
+        await updateStatus();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function setServiceEnabled(name, enabled) {
+    try {
+        await api('POST', `/services/${name}/${enabled ? 'enable' : 'disable'}`);
+        toast(`${name} ${enabled ? 'will' : 'will not'} auto-start`, 'success');
         await updateStatus();
     } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
